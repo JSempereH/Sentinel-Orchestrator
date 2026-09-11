@@ -1,0 +1,77 @@
+[project]
+name = "sentinel-analysis"
+version = "0.1.0"
+description = "Analysis-ready multisensor Sentinel analysis over areas of interest"
+readme = "README.md"
+license = "EUPL-1.2"
+license-files = ["LICENSE"]
+scripts = { sentinel-analysis = "sentinel_analysis.cli:main" }
+requires-python = ">=3.12"
+dependencies = [
+    "affine>=2.4.0",
+    "netcdf4>=1.7.0",
+    "numpy>=2.0.0",
+    "openeo>=0.50.0",
+    "pyproj>=3.7.0",
+    "python-dotenv>=1.1.0",
+    "requests>=2.32.0",
+    "xarray>=2025.1.0",
+]
+
+[project.optional-dependencies]
+cdse = ["eodag>=4.6.0"]
+cloud = ["dask[array]>=2025.1.0", "zarr>=3.0.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.7.0", "mypy>=1.13.0"]
+auxiliary = ["cdsapi>=0.7.7"]
+docs = ["mkdocs-material>=9.5.0"]
+notebook = ["ipykernel>=6.29.0", "ipywidgets>=8.1.0", "jupyterlab>=4.4.0", "matplotlib>=3.9.0", "nbconvert>=7.16.0", "pillow>=11.0.0"]
+optical = ["pyproj>=3.7.0", "rasterio>=1.4.0"]
+sar = ["pyproj>=3.7.0", "rasterio>=1.4.0"]
+s1ard = ["s1ard>=2.12.0"]
+geo = ["shapely>=2.0.0"]
+landsat = ["planetary-computer>=1.0.0", "rasterio>=1.4.0"]
+ecostress = ["rasterio>=1.4.0"]
+ml = ["scikit-learn>=1.6.0", "xgboost>=2.1.0"]
+hyp3 = ["hyp3-sdk>=7.7.7", "pyproj>=3.7.0", "rasterio>=1.4.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sentinel_analysis"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests requiring local real satellite products",
+]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+# InSAR-Orchestrator is a separate, independent git repo checked out under
+# this directory for local development, not part of this project; notebooks
+# have their own import-order conventions.
+extend-exclude = ["InSAR-Orchestrator", "notebooks"]
+
+[tool.ruff.lint]
+# Start narrow (errors, unused imports/vars, bugbear) rather than reformatting
+# the whole tree; widen the rule set incrementally once this is clean in CI.
+select = ["E", "F", "B"]
+ignore = [
+    "E501",  # line length: not a bug, and this codebase has long chained calls
+    "B008",  # np.timedelta64(...) as a default: immutable, not the mutable-default footgun this rule targets
+    "B905",  # zip() without strict=: the zipped arrays here always share length by construction
+]
+
+[tool.ruff.lint.per-file-ignores]
+# conftest.py deliberately sets env vars before importing app.config anywhere
+# else, so the sentinel-worker app never touches a real WORKER_OUTPUT_DIR in tests.
+"worker/tests/conftest.py" = ["E402"]
+
+[tool.mypy]
+# Optional extras (rasterio, scipy, planetary_computer, eodag, ...) aren't
+# always installed and don't all ship type stubs - checking sentinel_analysis's
+# own type-correctness doesn't require type-checking inside those libraries too.
+ignore_missing_imports = true
