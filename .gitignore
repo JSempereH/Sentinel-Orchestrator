@@ -1,0 +1,41 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Node-generated files (worker/frontend/)
+node_modules/
+
+# Virtual environments
+.venv
+.env
+# Any dotenv variant (.env.local, worker/.env.production, ...) except the
+# tracked templates - `.env` above already covers the bare file, this is
+# for the variants someone creates locally that `.env` alone wouldn't catch.
+.env.*
+!.env.example
+!worker/.env.example
+*.jwt
+*.token
+egms_token.json
+output/
+site/
+*_output.tiff
+*.nc
+*.tif
+
+worker/runs/
+
+# Jupyter's autosave checkpoints - never meant to be committed, unlike the
+# notebooks themselves in notebooks/.
+.ipynb_checkpoints/
+
+# OS/editor cruft that can show up in any subdirectory, not just
+# worker/frontend/ (which already ignores these locally for itself).
+.DS_Store
+.vscode/
+.idea/
+
