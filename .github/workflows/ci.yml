@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # `sar`/`s1ard` deliberately excluded: they pull in pyrosar, which
+      # hard-depends on building psycopg2 from source (needs libpq-dev/
+      # pg_config on PATH) for a scene-catalog feature nothing here uses -
+      # see worker/Dockerfile's and worker/README.md's identical exclusion.
+      # Without `ml`/`landsat`/`ecostress`/`cdse` here, every GWR, STARFM
+      # (ml-gated), Landsat and ECOSTRESS test just reports "skipped", not
+      # "passed" - this pipeline was staying green without actually
+      # exercising most of the library.
+      - name: Install dependencies
+        run: uv sync --extra dev --extra auxiliary --extra optical --extra ml --extra landsat --extra ecostress --extra cdse --extra hyp3
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      # Checked clean (0 errors across 46 source files) before making this
+      # blocking - see docs/roadmap.md. ignore_missing_imports is set in
+      # pyproject.toml's [tool.mypy] since optional extras (rasterio, scipy,
+      # planetary_computer, eodag, ...) don't all ship type stubs.
+      - name: Type check (mypy)
+        run: uv run mypy src/sentinel_analysis
+
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Build package
+        run: uv build
+
+  worker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # worker/tests/ mocks execute_and_persist in every job-submission
+      # test (see worker/tests/test_jobs.py's own docstring), so it needs
+      # this repo's own extras (for app/runner.py's imports at collection
+      # time), not `ml`/`landsat`/`ecostress` - those are only exercised by
+      # a real AnalysisWorkflow.execute() run, which nothing here does.
+      - name: Install worker dependencies
+        working-directory: worker
+        run: |
+          uv venv .venv
+          uv pip install --python .venv -r requirements.txt -r requirements-dev.txt
+          uv pip install --python .venv -e "..[cdse,auxiliary,optical,cloud,hyp3]"
+
+      # `python -m pytest`, not the bare `.venv/bin/pytest` binary - the
+      # latter does not insert the current directory onto sys.path, so
+      # `worker/tests/conftest.py`'s `from app import jobs` fails with
+      # ModuleNotFoundError (confirmed locally, not a CI-only quirk).
+      - name: Test
+        working-directory: worker
+        run: .venv/bin/python -m pytest -q
