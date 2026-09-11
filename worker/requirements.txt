@@ -1,0 +1,10 @@
+# sentinel_analysis (this repo's own package) is not listed here as a plain
+# requirement because it needs extras a real multisensor run requires. Install
+# it editable with those extras, e.g. from this repo's root:
+#   uv pip install --python worker/.venv -e ".[cdse,auxiliary,optical,sar,s1ard,hyp3,cloud]"
+# (this is exactly what `make install-worker` does). The base
+# sentinel-analysis dependencies alone are not enough to run execute() end to end.
+
+fastapi>=0.138.0
+uvicorn[standard]>=0.49.0
+pydantic-settings>=2.14.2
