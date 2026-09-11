@@ -1,0 +1,22 @@
+# Runs the sentinel-worker in a container. An alternative to `make worker`
+# (bare venv) for a more reproducible, restart-safe deployment.
+#
+# Usage:
+#   cp worker/.env.example worker/.env
+#   # fill in WORKER_API_TOKEN + CDSE/CDS/CAMS/OpenAQ credentials
+#   docker compose up --build
+
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    ports:
+      - "8100:8100"
+    env_file:
+      - worker/.env
+    volumes:
+      - sentinel-worker-data:/data
+
+volumes:
+  sentinel-worker-data:
