@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="180" viewBox="0 0 900 180" role="img" aria-label="Sentinel Analysis architecture">
+  <style>text{font:16px sans-serif;fill:#17324d} rect{fill:#e7f0f7;stroke:#2878a6;stroke-width:2} path{stroke:#2878a6;stroke-width:2;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#2878a6"/></marker></defs>
+  <rect x="20" y="65" width="170" height="50" rx="8"/><text x="45" y="95">AnalysisRequest</text>
+  <rect x="250" y="65" width="170" height="50" rx="8"/><text x="286" y="95">WorkflowPlan</text>
+  <rect x="480" y="20" width="170" height="50" rx="8"/><text x="523" y="50">Sentinel data</text>
+  <rect x="480" y="110" width="170" height="50" rx="8"/><text x="505" y="140">Auxiliary data</text>
+  <rect x="710" y="65" width="170" height="50" rx="8"/><text x="752" y="95">AnalysisResult</text>
+  <path d="M190 90 H250"/><path d="M420 82 L480 45"/><path d="M420 98 L480 135"/><path d="M650 45 L710 82"/><path d="M650 135 L710 98"/>
+</svg>

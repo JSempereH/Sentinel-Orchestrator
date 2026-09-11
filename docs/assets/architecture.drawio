@@ -1,0 +1,159 @@
+<mxfile host="app.diagrams.net" modified="2026-08-26T00:00:00.000Z" version="24.7.17" type="device">
+  <diagram id="sentinel-analysis-architecture" name="Sentinel Analysis Architecture">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="SENTINEL ANALYSIS | MULTISENSOR URBAN HEAT WORKFLOW" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=24;fontStyle=1;fontColor=#003B5C;" vertex="1" parent="1">
+          <mxGeometry x="50" y="35" width="1050" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Reproducible discovery, acquisition, harmonization and fusion of satellite and environmental observations" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=14;fontColor=#47758A;" vertex="1" parent="1">
+          <mxGeometry x="52" y="76" width="1050" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="mission-mark" value="ESA-INSPIRED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCC00;strokeColor=#003B5C;strokeWidth=1;fontFamily=Arial;fontSize=11;fontStyle=1;fontColor=#003B5C;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1360" y="42" width="180" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sources-zone" value="DATA SOURCES" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4FAFC;strokeColor=#00A6D6;strokeWidth=2;dashed=1;dashPattern=8 6;fontFamily=Arial;fontSize=14;fontStyle=1;fontColor=#003B5C;align=left;verticalAlign=top;spacingTop=12;spacingLeft=16;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="35" y="130" width="285" height="690" as="geometry" />
+        </mxCell>
+        <mxCell id="orchestration-zone" value="ORCHESTRATION" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7FBFC;strokeColor=#003B5C;strokeWidth=2;dashed=1;dashPattern=8 6;fontFamily=Arial;fontSize=14;fontStyle=1;fontColor=#003B5C;align=left;verticalAlign=top;spacingTop=12;spacingLeft=16;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="345" y="130" width="300" height="690" as="geometry" />
+        </mxCell>
+        <mxCell id="processing-zone" value="PROCESSING AND FUSION" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F7FBFC;strokeColor=#006B8F;strokeWidth=2;dashed=1;dashPattern=8 6;fontFamily=Arial;fontSize=14;fontStyle=1;fontColor=#003B5C;align=left;verticalAlign=top;spacingTop=12;spacingLeft=16;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="670" y="130" width="585" height="690" as="geometry" />
+        </mxCell>
+        <mxCell id="outputs-zone" value="ANALYSIS PRODUCTS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4FAFC;strokeColor=#003B5C;strokeWidth=2;dashed=1;dashPattern=8 6;fontFamily=Arial;fontSize=14;fontStyle=1;fontColor=#003B5C;align=left;verticalAlign=top;spacingTop=12;spacingLeft=16;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="130" width="280" height="690" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3" value="&lt;b&gt;Sentinel-3 LST&lt;/b&gt;&lt;br&gt;CDSE / EODAG / openEO&lt;br&gt;Thermal reference grid" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#003B5C;strokeColor=#002B43;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="180" width="235" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="local-products" value="&lt;b&gt;Optional local products&lt;/b&gt;&lt;br&gt;Sentinel-1 / Sentinel-2 / Sentinel-5P&lt;br&gt;Reader adapters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#006B8F;strokeColor=#004C66;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="295" width="235" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="era5" value="&lt;b&gt;ERA5&lt;/b&gt;&lt;br&gt;CDS reanalysis&lt;br&gt;Gridded meteorology" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00A6D6;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="440" width="235" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="cams" value="&lt;b&gt;CAMS&lt;/b&gt;&lt;br&gt;Atmosphere Data Store&lt;br&gt;Gridded composition" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00A6D6;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="550" width="235" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="openaq" value="&lt;b&gt;OpenAQ&lt;/b&gt;&lt;br&gt;REST API&lt;br&gt;Station observations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCC00;strokeColor=#B38600;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="660" width="235" height="78" as="geometry" />
+        </mxCell>
+
+        <mxCell id="request" value="&lt;b&gt;AnalysisRequest&lt;/b&gt;&lt;br&gt;AOI | dates | sensors | auxiliary specs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="375" y="185" width="240" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="plan" value="&lt;b&gt;WorkflowPlan&lt;/b&gt;&lt;br&gt;Resolved products and provider requests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F4F8;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="375" y="310" width="240" height="78" as="geometry" />
+        </mxCell>
+        <mxCell id="acquisition" value="&lt;b&gt;Discovery and acquisition&lt;/b&gt;&lt;br&gt;STAC | CDS | ADS | OpenAQ&lt;br&gt;SHA-256 cache and manifests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D7EEF5;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="375" y="455" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="config" value="&lt;b&gt;Configuration&lt;/b&gt;&lt;br&gt;Credentials from environment&lt;br&gt;No secrets in manifests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8D9;strokeColor=#B38600;strokeWidth=1;fontFamily=Arial;fontSize=12;fontColor=#604C00;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="375" y="650" width="240" height="72" as="geometry" />
+        </mxCell>
+
+        <mxCell id="readers" value="&lt;b&gt;Sensor readers&lt;/b&gt;&lt;br&gt;LST, quality flags, NDVI, masks&lt;br&gt;Local S1 / S2 / S5P adapters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#003B5C;strokeColor=#002B43;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="710" y="190" width="245" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="providers" value="&lt;b&gt;Auxiliary providers&lt;/b&gt;&lt;br&gt;ERA5 and CAMS as grids&lt;br&gt;OpenAQ preserved as stations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00A6D6;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="710" y="410" width="245" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="quality" value="&lt;b&gt;Normalize and quality control&lt;/b&gt;&lt;br&gt;Coordinates | units | masks | metadata" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F4F8;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="990" y="190" width="235" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="harmonize" value="&lt;b&gt;Harmonization&lt;/b&gt;&lt;br&gt;Spatial regridding&lt;br&gt;Temporal matching and deltas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D7EEF5;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="990" y="350" width="235" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="fusion" value="&lt;b&gt;Fusion and downscaling&lt;/b&gt;&lt;br&gt;Thermal cube + predictor cube&lt;br&gt;Uncertainty and provenance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#006B8F;strokeColor=#004C66;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="990" y="530" width="235" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="validation" value="&lt;b&gt;Validation&lt;/b&gt;&lt;br&gt;Schema, coverage and consistency checks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8D9;strokeColor=#B38600;strokeWidth=1;fontFamily=Arial;fontSize=12;fontColor=#604C00;align=center;verticalAlign=middle;spacing=6;" vertex="1" parent="1">
+          <mxGeometry x="990" y="690" width="235" height="72" as="geometry" />
+        </mxCell>
+
+        <mxCell id="products-group" value="RESULT CONTENTS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D3E2E8;strokeWidth=1;dashed=1;dashPattern=6 4;fontFamily=Arial;fontSize=12;fontStyle=1;fontColor=#47758A;align=left;verticalAlign=top;spacingTop=10;spacingLeft=12;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="330" width="240" height="420" as="geometry" />
+        </mxCell>
+        <mxCell id="result" value="&lt;b&gt;AnalysisResult&lt;/b&gt;&lt;br&gt;One typed result with data and provenance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#003B5C;strokeColor=#002B43;strokeWidth=2;fontFamily=Arial;fontSize=14;fontColor=#FFFFFF;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="190" width="240" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="thermal" value="&lt;b&gt;thermal_cube&lt;/b&gt;&lt;br&gt;Sentinel-3 thermal analysis grid" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F4F8;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="370" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="predictor" value="&lt;b&gt;predictor_cube&lt;/b&gt;&lt;br&gt;S1 / S2 / S5P + gridded auxiliary data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D7EEF5;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="460" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="auxiliary" value="&lt;b&gt;auxiliary&lt;/b&gt;&lt;br&gt;ERA5 / CAMS grids + OpenAQ stations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8D9;strokeColor=#B38600;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#604C00;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="550" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="exports" value="&lt;b&gt;Exports and audit trail&lt;/b&gt;&lt;br&gt;NetCDF / COG GeoTIFF / JSON manifests&lt;br&gt;Cache, hashes, quality and uncertainty" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F5F7;strokeColor=#47758A;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="640" width="220" height="82" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e-request-plan" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=11;fontColor=#003B5C;endArrow=block;endFill=1;" edge="1" parent="1" source="request" target="plan">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-plan-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=11;fontColor=#003B5C;endArrow=block;endFill=1;" edge="1" parent="1" source="plan" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-config-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#B38600;strokeWidth=1;fontFamily=Arial;fontSize=10;fontColor=#604C00;endArrow=block;endFill=1;" edge="1" parent="1" source="config" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-s3-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.5;entryX=0;entryY=0.22;endArrow=block;endFill=1;" edge="1" parent="1" source="s3" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-local-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#006B8F;strokeWidth=1;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.5;entryX=0;entryY=0.38;endArrow=block;endFill=1;" edge="1" parent="1" source="local-products" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-era5-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.5;entryX=0;entryY=0.54;endArrow=block;endFill=1;" edge="1" parent="1" source="era5" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-cams-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.5;entryX=0;entryY=0.7;endArrow=block;endFill=1;" edge="1" parent="1" source="cams" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-openaq-acq" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B38600;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#604C00;exitX=1;exitY=0.5;entryX=0;entryY=0.86;endArrow=block;endFill=1;" edge="1" parent="1" source="openaq" target="acquisition">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-acq-readers" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#003B5C;exitX=1;exitY=0.22;entryX=0;entryY=0.5;endArrow=block;endFill=1;" edge="1" parent="1" source="acquisition" target="readers">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-acq-providers" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.72;entryX=0;entryY=0.5;endArrow=block;endFill=1;" edge="1" parent="1" source="acquisition" target="providers">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-readers-quality" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#003B5C;exitX=1;exitY=0.5;entryX=0;entryY=0.5;endArrow=block;endFill=1;" edge="1" parent="1" source="readers" target="quality">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-providers-quality" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=1;exitY=0.5;entryX=0;entryY=0.8;endArrow=block;endFill=1;" edge="1" parent="1" source="providers" target="quality">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-quality-harmonize" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=0.5;exitY=1;entryX=0.5;entryY=0;endArrow=block;endFill=1;" edge="1" parent="1" source="quality" target="harmonize">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-harmonize-fusion" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=10;fontColor=#006B8F;exitX=0.5;exitY=1;entryX=0.5;entryY=0;endArrow=block;endFill=1;" edge="1" parent="1" source="harmonize" target="fusion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-validation-fusion" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#B38600;strokeWidth=1;fontFamily=Arial;fontSize=10;fontColor=#604C00;exitX=0.5;exitY=0;entryX=0.5;entryY=1;endArrow=block;endFill=1;" edge="1" parent="1" source="validation" target="fusion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-fusion-result" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=2;fontFamily=Arial;fontSize=11;fontColor=#003B5C;exitX=1;exitY=0.5;entryX=0;entryY=0.5;endArrow=block;endFill=1;" edge="1" parent="1" source="fusion" target="result">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-result-products" value="contains" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#003B5C;strokeWidth=1;fontFamily=Arial;fontSize=10;fontColor=#003B5C;exitX=0.5;exitY=1;entryX=0.5;entryY=0;endArrow=block;endFill=1;" edge="1" parent="1" source="result" target="products-group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="&lt;b&gt;Visual language&lt;/b&gt;&lt;br&gt;&lt;font color='#003B5C'&gt;Navy&lt;/font&gt; = satellite and core workflow  |  &lt;font color='#00A6D6'&gt;Cyan&lt;/font&gt; = gridded environmental data  |  &lt;font color='#B38600'&gt;Yellow&lt;/font&gt; = stations, configuration and checks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D3E2E8;strokeWidth=1;fontFamily=Arial;fontSize=12;fontColor=#47758A;align=left;verticalAlign=middle;spacingLeft=16;" vertex="1" parent="1">
+          <mxGeometry x="50" y="860" width="1490" height="52" as="geometry" />
+        </mxCell>
+        <mxCell id="footnote" value="Data products remain traceable through provider manifests, SHA-256 hashes, quality metadata and uncertainty fields." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontFamily=Arial;fontSize=12;fontColor=#47758A;" vertex="1" parent="1">
+          <mxGeometry x="52" y="925" width="1200" height="25" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
