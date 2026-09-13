@@ -9,6 +9,7 @@ from .base import (
     open_gridded_dataset,
 )
 from .cams import CAMSConfig, CAMSProvider
+from .carbon_mapper import CarbonMapperConfig, CarbonMapperProvider
 from .era5 import ERA5Config, ERA5Provider
 from .openaq import OpenAQConfig, OpenAQInterpolationConfig, OpenAQProvider
 
@@ -19,6 +20,8 @@ __all__ = [
     "AuxiliarySpec",
     "CAMSConfig",
     "CAMSProvider",
+    "CarbonMapperConfig",
+    "CarbonMapperProvider",
     "ERA5Config",
     "ERA5Provider",
     "OpenAQConfig",
