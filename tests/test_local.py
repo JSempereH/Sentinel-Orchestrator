@@ -45,6 +45,8 @@ from sentinel_analysis import (
     read_s1_rtc,
     Sentinel1Catalog,
     Sentinel1RTCConfig,
+    Sentinel2Catalog,
+    SENTINEL2_L1C_PRODUCT_TYPE,
     read_s5p_l2,
     grid_s5p,
     grid_l2_lst,
@@ -165,6 +167,38 @@ def test_city_grid_quality_and_heat_contracts():
     metrics = heat_hazard_metrics(tagged, threshold_celsius=35)
     assert metrics["hot_observation_count"].item() == 1
     assert metrics.attrs["missing_values_filled"] is False
+
+
+def test_read_radiometric_offsets_resolves_band_id_and_defaults_empty(tmp_path: Path):
+    # Regression test: real CDSE products post processing-baseline 04.00
+    # (2022-01-25 onward) carry a per-band RADIO_ADD_OFFSET/BOA_ADD_OFFSET
+    # (typically -1000) that must be added to the raw DN *before* dividing
+    # by QUANTIFICATION_VALUE - confirmed missing (and then fixed) against
+    # a real downloaded L1C product in
+    # scripts/validate_sentinel2_l1c_real_reference.py.
+    from sentinel_analysis.sensors.sentinel2 import _read_radiometric_offsets
+
+    manifest = tmp_path / "MTD_MSIL1C.xml"
+    manifest.write_text(
+        '<?xml version="1.0"?>\n'
+        '<n1:Level-1C_User_Product xmlns:n1="https://psd-14.sentinel2.eo.esa.int/PSD/User_Product_Level-1C.xsd">\n'
+        "  <n1:General_Info>\n"
+        "    <Product_Image_Characteristics>\n"
+        "      <Radiometric_Offset_List>\n"
+        '        <RADIO_ADD_OFFSET band_id="0">-1000</RADIO_ADD_OFFSET>\n'
+        '        <RADIO_ADD_OFFSET band_id="8">-1000</RADIO_ADD_OFFSET>\n'
+        "      </Radiometric_Offset_List>\n"
+        "    </Product_Image_Characteristics>\n"
+        "  </n1:General_Info>\n"
+        "</n1:Level-1C_User_Product>\n",
+        encoding="utf-8",
+    )
+
+    offsets = _read_radiometric_offsets(manifest, "RADIO_ADD_OFFSET")
+
+    assert offsets == {"B01": -1000, "B8A": -1000}
+    assert _read_radiometric_offsets(tmp_path / "missing.xml", "RADIO_ADD_OFFSET") == {}
+    assert _read_radiometric_offsets(manifest, "BOA_ADD_OFFSET") == {}
 
 
 def test_cf_quality_and_sentinel2_indices():
@@ -486,6 +520,38 @@ def test_sentinel1_catalog_searches_odata_excluding_cog():
     assert len(selected) == 1
 
 
+def test_sentinel2_catalog_searches_l1c_product_type_on_request():
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, *, params, timeout):
+            self.calls.append(params)
+            return Response({"value": []})
+
+    session = Session()
+    aoi = AOI(west=13.2, south=52.4, east=13.6, north=52.6)
+
+    Sentinel2Catalog(session=session).search(aoi, "2026-08-01", "2026-08-15")
+    assert "S2MSI2A" in session.calls[0]["$filter"]
+
+    Sentinel2Catalog(session=session, product_type=SENTINEL2_L1C_PRODUCT_TYPE).search(aoi, "2026-08-01", "2026-08-15")
+    assert "S2MSI1C" in session.calls[1]["$filter"]
+
+    with pytest.raises(ValueError):
+        Sentinel2Catalog(session=session, product_type="bogus")
+
+
 def test_read_s1_rtc_reads_hyp3_polarization_tifs(tmp_path: Path):
     rasterio = pytest.importorskip("rasterio")
     from rasterio.transform import from_origin
@@ -713,6 +779,34 @@ def test_sentinel3_geolocation_bins_to_real_analysis_grid():
     converted = to_celsius(georeferenced)
     assert converted["lst"].attrs["units"] == "degC"
     assert np.nanmin(converted["lst"].values) > 20
+
+
+def test_analysis_grid_chips_partitions_fixed_size_patches():
+    # 100x60 px at 20m = 2000x1200m parent, chipped into 500m (25px) chips:
+    # 4 whole columns, 2 whole rows, with a half-height row left over.
+    grid = AnalysisGrid.from_bounds((0, 0, 2000, 1200), crs="EPSG:32633", resolution_m=20)
+
+    chips = grid.chips(500)
+
+    assert len(chips) == 4 * 2
+    assert all(chip.width == 25 and chip.height == 25 for chip in chips)
+    assert all(chip.crs == grid.crs and chip.resolution == grid.resolution for chip in chips)
+    # Chips tile the parent grid without gaps or overlap.
+    lefts = sorted({chip.bounds[0] for chip in chips})
+    tops = sorted({chip.bounds[3] for chip in chips})
+    assert lefts == [0.0, 500.0, 1000.0, 1500.0]
+    assert tops == [700.0, 1200.0]
+    assert len({chip.grid_id for chip in chips}) == len(chips)
+
+    kept = grid.chips(500, drop_partial=False)
+    assert len(kept) == 4 * 3
+    assert any(chip.height < 25 for chip in kept)
+
+
+def test_analysis_grid_chips_rejects_non_multiple_chip_size():
+    grid = AnalysisGrid.from_bounds((0, 0, 1000, 1000), crs="EPSG:32633", resolution_m=20)
+    with pytest.raises(ValueError):
+        grid.chips(15)
 
 
 def _synthetic_l2_lst_product(*, time: str, x: np.ndarray, y: np.ndarray, lst_value: float) -> xr.Dataset:
