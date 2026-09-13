@@ -10,6 +10,7 @@ import xarray as xr
 
 from sentinel_analysis import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, AuxiliarySpec, OpenAQInterpolationConfig
 from sentinel_analysis.providers.cams import CAMSProvider
+from sentinel_analysis.providers.carbon_mapper import CarbonMapperProvider
 from sentinel_analysis.providers.era5 import ERA5Provider
 from sentinel_analysis.providers.openaq import OpenAQProvider
 
@@ -102,6 +103,69 @@ def test_openaq_open_creates_station_table_and_preserves_units(tmp_path: Path):
     assert result["NO2"].shape == (1, 2)
     assert result["NO2"].attrs["units"] == "ug/m3"
     assert result.latitude.item() == 52.52
+
+
+def test_carbon_mapper_build_request_uses_bbox_and_dates():
+    request = CarbonMapperProvider().build_request(AOI(13.2, 52.4, 13.5, 52.6), "2025-06-01", "2025-06-10")
+    assert request["bbox"] == [13.2, 52.4, 13.5, 52.6]
+    assert request["date_from"] == "2025-06-01"
+    assert request["date_to"] == "2025-06-10"
+
+
+def test_carbon_mapper_open_creates_point_table_with_units(tmp_path: Path):
+    payload = {
+        "provider": "carbon_mapper",
+        "plumes": [{
+            "source_id": "C00203",
+            "candidate_id": "ang20200708t192518-3",
+            "latitude": 34.3198985,
+            "longitude": -118.51149,
+            "date": "2020-07-08",
+            "emission_rate_kg_h": 339.311781,
+            "emission_rate_uncertainty_kg_h": 204.404889,
+        }],
+    }
+    path = tmp_path / "carbon_mapper.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    result = CarbonMapperProvider().open(path)
+    assert result.attrs["analysis_shape"] == "point_table"
+    assert result["emission_rate"].attrs["units"] == "kg h-1"
+    assert result["emission_rate"].item() == pytest.approx(339.311781)
+    assert result.latitude.item() == pytest.approx(34.3198985)
+    assert result.plume.item() == "ang20200708t192518-3"
+
+
+def test_carbon_mapper_download_filters_by_aoi_and_date(tmp_path: Path):
+    class _RawResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        content = b"pretend-this-is-an-xls-file"
+
+    class _RawSession:
+        def get(self, url, **kwargs):
+            return _RawResponse()
+
+    # xlrd (the [carbon_mapper] extra) isn't a required dependency, so the
+    # sheet-parsing step - the one part of the provider that actually needs
+    # it - is stubbed here; everything else exercises real filtering logic
+    # against a raw row shape matching the real Zenodo .xls columns.
+    rows = [
+        {"source_id": "C1", "candidate_id": "in-window", "plume_lat": 52.5, "plume_lon": 13.3, "date": 45809.0, "qplume": 100.0, "sigma_qplume": 10.0},
+        {"source_id": "C2", "candidate_id": "outside-aoi", "plume_lat": 10.0, "plume_lon": 10.0, "date": 45809.0, "qplume": 50.0, "sigma_qplume": 5.0},
+        {"source_id": "C3", "candidate_id": "outside-date", "plume_lat": 52.5, "plume_lon": 13.3, "date": 1.0, "qplume": 30.0, "sigma_qplume": 3.0},
+    ]
+    provider = CarbonMapperProvider(session=cast(Any, _RawSession()))
+    provider._read_plumes = lambda raw_path: rows  # type: ignore[method-assign]
+
+    artifact = provider.download(AOI(13.2, 52.4, 13.5, 52.6), "2025-06-01", "2025-06-02", AuxiliarySpec("carbon_mapper"), tmp_path)
+
+    result = provider.open(artifact.path)
+    assert list(result.plume.values) == ["in-window"]
+    assert result["emission_rate"].item() == 100.0
+    assert (tmp_path / "manifest.json").exists()
 
 
 def test_openaq_download_follows_sensor_measurement_endpoint(tmp_path: Path):
