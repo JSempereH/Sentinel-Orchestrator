@@ -86,6 +86,17 @@ OPENAQ_API_KEY=YOUR_OPENAQ_KEY
 
 The API endpoint is `https://api.openaq.org/v3`.
 
+### Carbon Mapper
+
+No credentials needed - the `carbon_mapper` auxiliary provider reads one
+public, static Zenodo file (the 2020-2021 airborne methane plume catalog,
+[10.5281/zenodo.7072824](https://doi.org/10.5281/zenodo.7072824)), not a
+live API. It does need the `.xls` parser:
+
+```bash
+uv sync --extra carbon_mapper
+```
+
 ### Earthdata (ECOSTRESS and `sentinel1_backend="hyp3_rtc"`)
 
 Both sit behind the same `urs.earthdata.nasa.gov` login. Generate a
