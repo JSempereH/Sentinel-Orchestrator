@@ -112,6 +112,52 @@ class AnalysisGrid:
             city_id=city.city_id,
         )
 
+    def chips(self, chip_size_m: float, *, drop_partial: bool = True) -> list["AnalysisGrid"]:
+        """Partition this grid into fixed-size, non-overlapping sub-grids.
+
+        Unlike `from_bounds`, which snaps to an arbitrary AOI-shaped extent,
+        this produces uniform patches (e.g. the 2.5x2.5 km chips fixed-size
+        training/inference patches are built from). `chip_size_m` must be a
+        whole multiple of the grid resolution. By default a chip that would
+        be cut short by the parent grid's edge is dropped rather than
+        returned undersized; pass ``drop_partial=False`` to keep it.
+        """
+
+        if chip_size_m <= 0:
+            raise ValueError("chip_size_m must be positive")
+        resolution = self.resolution[0]
+        chip_pixels = chip_size_m / resolution
+        if abs(chip_pixels - round(chip_pixels)) > 1e-6:
+            raise ValueError(f"chip_size_m ({chip_size_m}) must be a whole multiple of the grid resolution ({resolution})")
+        chip_pixels = int(round(chip_pixels))
+        if chip_pixels < 1:
+            raise ValueError("chip_size_m must be at least one pixel wide")
+
+        left, _, _, top = self.bounds
+        n_cols = self.width // chip_pixels if drop_partial else ceil(self.width / chip_pixels)
+        n_rows = self.height // chip_pixels if drop_partial else ceil(self.height / chip_pixels)
+        result: list[AnalysisGrid] = []
+        for row in range(n_rows):
+            for col in range(n_cols):
+                chip_width = min(chip_pixels, self.width - col * chip_pixels)
+                chip_height = min(chip_pixels, self.height - row * chip_pixels)
+                chip_left = left + col * chip_pixels * resolution
+                chip_top = top - row * chip_pixels * resolution
+                chip_bounds = (chip_left, chip_top - chip_height * resolution, chip_left + chip_width * resolution, chip_top)
+                result.append(
+                    AnalysisGrid(
+                        grid_id=f"{self.grid_id}:chip:{row}:{col}",
+                        crs=self.crs,
+                        bounds=chip_bounds,
+                        resolution=self.resolution,
+                        width=chip_width,
+                        height=chip_height,
+                        transform=Affine(resolution, 0, chip_left, 0, -resolution, chip_top),
+                        city_id=self.city_id,
+                    )
+                )
+        return result
+
 
 # Existing public name remains a readable alias while new code can use the
 # domain-specific AnalysisGrid name.
