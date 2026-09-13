@@ -14,7 +14,7 @@ import xarray as xr
 from ..cache import AssetCache
 
 
-AUXILIARY_PROVIDERS = ("era5", "cams", "openaq")
+AUXILIARY_PROVIDERS = ("era5", "cams", "openaq", "carbon_mapper")
 
 
 class AuxiliaryProviderError(RuntimeError):
