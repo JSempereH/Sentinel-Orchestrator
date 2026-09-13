@@ -3,10 +3,7 @@
 Unlike ERA5/CAMS/OpenAQ, this is one static, versioned file - the 2020-2021
 airborne (AVIRIS-NG/GAO) plume list backing Varon et al. 2024 (Nat. Commun.
 s41467-024-47754-y), published on Zenodo under
-`10.5281/zenodo.7072824 <https://doi.org/10.5281/zenodo.7072824>`_ - rather
-than a live, queryable API. There is no auth and no server-side filtering:
-the whole catalog is downloaded once and cached, and each ``download()``
-call filters that cached copy to the requested AOI/date range.
+`10.5281/zenodo.7072824 <https://doi.org/10.5281/zenodo.7072824>`
 """
 
 from __future__ import annotations
