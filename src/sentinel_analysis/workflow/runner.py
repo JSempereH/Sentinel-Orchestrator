@@ -28,7 +28,7 @@ from ..sensors.sentinel3.processing import apply_quality_mask, to_celsius
 from ..sensors.sentinel3.pipeline import Sentinel3LST
 from ..sensors.sentinel5p import Sentinel5PCatalog, grid_s5p
 from ..harmonization.spatial import harmonize_spatial
-from ..providers import AuxiliarySpec, CAMSProvider, ERA5Provider, OpenAQInterpolationConfig, OpenAQProvider
+from ..providers import AuxiliarySpec, CAMSProvider, CarbonMapperProvider, ERA5Provider, OpenAQInterpolationConfig, OpenAQProvider
 from .plan import WorkflowPlan, build_plan
 from .request import AnalysisRequest
 from .result import AnalysisResult
@@ -150,6 +150,8 @@ class AnalysisWorkflow:
             return CAMSProvider()
         if spec.provider == "openaq":
             return OpenAQProvider()
+        if spec.provider == "carbon_mapper":
+            return CarbonMapperProvider()
         raise ValueError(f"Unsupported auxiliary provider: {spec.provider}")
 
     def acquire_auxiliary(self, output_dir: str | Path) -> dict[str, xr.Dataset]:
@@ -189,7 +191,12 @@ class AnalysisWorkflow:
             if sensor not in self.request.sensors and sensor not in auxiliary_names:
                 raise ValueError(f"Dataset sensor {sensor!r} is not present in the request")
             if sensor in auxiliary_names:
-                if dataset.attrs.get("analysis_shape") == "station_table":
+                if dataset.attrs.get("analysis_shape") in {"station_table", "point_table"}:
+                    # Station tables (OpenAQ) are repeated timeseries at
+                    # fixed locations that can be interpolated onto a grid;
+                    # point tables (Carbon Mapper) are one-off event catalogs
+                    # with no such structure - both are kept as references
+                    # rather than rasterized.
                     auxiliary[sensor] = dataset
                     continue
                 if dataset.attrs.get("analysis_shape") == "swath":
