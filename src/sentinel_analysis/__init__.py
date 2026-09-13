@@ -36,7 +36,18 @@ from .sensors.sentinel1 import (
 )
 from .sensors.ecostress import EcostressCatalog, read_ecostress_lst
 from .sensors.landsat import LandsatCatalog, read_landsat_lst
-from .sensors.sentinel2 import Sentinel2Catalog, Sentinel2ReadConfig, compose_s2, read_s2_l2a, scl_valid_mask, sentinel2_coverage, sentinel2_indices
+from .sensors.sentinel2 import (
+    SENTINEL2_L1C_PRODUCT_TYPE,
+    Sentinel2Catalog,
+    Sentinel2L1CReadConfig,
+    Sentinel2ReadConfig,
+    compose_s2,
+    read_s2_l1c,
+    read_s2_l2a,
+    scl_valid_mask,
+    sentinel2_coverage,
+    sentinel2_indices,
+)
 from .sensors.sentinel5p import Sentinel5PCatalog, Sentinel5PReadConfig, grid_s5p, read_s5p_l2
 from .sensors.sentinel3 import (
     CDSECatalog,
@@ -61,9 +72,9 @@ from .storage import open_zarr, read_cog, validate_cog, write_cog, write_zarr
 from .stac import STACCatalog, STACItem
 from .metadata import apply_variable_contract, ensure_compatible_units, validate_variable_contract
 from .reference import collocate_stations
-from .providers import AUXILIARY_PROVIDERS, AuxiliaryArtifact, AuxiliarySpec, CAMSConfig, CAMSProvider, ERA5Config, ERA5Provider, OpenAQConfig, OpenAQInterpolationConfig, OpenAQProvider
+from .providers import AUXILIARY_PROVIDERS, AuxiliaryArtifact, AuxiliarySpec, CAMSConfig, CAMSProvider, CarbonMapperConfig, CarbonMapperProvider, ERA5Config, ERA5Provider, OpenAQConfig, OpenAQInterpolationConfig, OpenAQProvider
 from .validation import blocked_spatiotemporal_split, compare_to_reference, validate_independent_reference
-from .workflow import AnalysisRequest, AnalysisResult, AnalysisWorkflow
+from .workflow import AnalysisRequest, AnalysisResult, AnalysisWorkflow, TemporalPair, select_temporal_pair
 
 __all__ = [
     "AOI",
@@ -78,6 +89,8 @@ __all__ = [
     "AuxiliarySpec",
     "CAMSConfig",
     "CAMSProvider",
+    "CarbonMapperConfig",
+    "CarbonMapperProvider",
     "CoarseConsistentDownscaler",
     "GWRDownscaler",
     "CDSECatalog",
@@ -110,6 +123,8 @@ __all__ = [
     "Sentinel1RTCConfig",
     "Sentinel2Catalog",
     "Sentinel2ReadConfig",
+    "Sentinel2L1CReadConfig",
+    "SENTINEL2_L1C_PRODUCT_TYPE",
     "Sentinel5PCatalog",
     "Sentinel5PReadConfig",
     "Sentinel3LST",
@@ -119,6 +134,8 @@ __all__ = [
     "STACItem",
     "TemporalMatch",
     "TemporalPolicy",
+    "TemporalPair",
+    "select_temporal_pair",
     "align_features",
     "apply_variable_contract",
     "apply_quality_mask",
@@ -165,6 +182,7 @@ __all__ = [
     "read_s1_ard",
     "read_s1_rtc",
     "read_s2_l2a",
+    "read_s2_l1c",
     "read_s5p_l2",
     "reaggregate_to_target",
     "scl_valid_mask",
