@@ -44,7 +44,10 @@ def align_features(
         if target.attrs["grid_id"] != features.attrs["grid_id"]:
             raise CubeValidationError("Target and feature cubes use different grids")
     policy = match or TemporalMatch()
-    policy = match or TemporalMatch()
+    # Nearest-time reindexing and the searchsorted below both require a
+    # monotonic source index; acquisitions often arrive in catalogue
+    # (cloud-cover) order rather than chronological order.
+    features = features.sortby("time")
     aligned = features.reindex(
         time=target.time,
         method="nearest",

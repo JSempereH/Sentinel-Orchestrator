@@ -7,6 +7,7 @@ from .georeference import grid_l2_lst
 from .pipeline import Sentinel3LST
 from .processing import daily_mean, statistics, to_celsius
 from .quality import (
+    LSTConfidenceFlag,
     LSTExceptionFlag,
     QualityPolicy,
     apply_quality_mask,
@@ -19,6 +20,7 @@ from .reader import ProductFormatError, inspect_l2_lst, read_l2_lst
 __all__ = [
     "CDSECatalog",
     "CDSEDownloader",
+    "LSTConfidenceFlag",
     "LSTExceptionFlag",
     "ProductFormatError",
     "ProductQuery",

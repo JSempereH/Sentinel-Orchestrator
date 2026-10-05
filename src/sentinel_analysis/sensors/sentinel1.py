@@ -812,3 +812,94 @@ class Sentinel1Catalog:
             url = payload.get("@odata.nextLink")
             params = None
         return products
+
+
+SENTINEL1_RTC_STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
+SENTINEL1_RTC_STAC_COLLECTION = "sentinel-1-rtc"
+
+
+class Sentinel1RTCSTACCatalog:
+    """Search Planetary Computer's pre-processed Sentinel-1 RTC collection.
+
+    The ``sentinel1_backend="pc_rtc"`` path: radiometrically terrain-corrected
+    gamma0 COGs that already exist in the cloud, so there is no GRD download,
+    no SNAP run (~2.6 min and ~11 GB RAM per scene here) and no HyP3 job.
+    """
+
+    def __init__(self, *, endpoint: str = SENTINEL1_RTC_STAC_ENDPOINT, collection: str = SENTINEL1_RTC_STAC_COLLECTION, catalog: Any | None = None):
+        from ..stac import STACCatalog
+
+        self.collection = collection
+        self.catalog = catalog or STACCatalog(endpoint)
+
+    def search(
+        self,
+        aoi: AOI,
+        start: str | date | datetime,
+        end: str | date | datetime,
+        *,
+        limit: int = 100,
+    ) -> list[ProductRef]:
+        from .cog import stac_product_ref
+
+        start = start if isinstance(start, str) else start.isoformat()
+        end = end if isinstance(end, str) else end.isoformat()
+        aoi.as_extent()
+        items = self.catalog.search(
+            collections=[self.collection],
+            bbox=[aoi.west, aoi.south, aoi.east, aoi.north],
+            datetime_range=f"{start}/{end}",
+            limit=limit,
+        )
+        return [stac_product_ref(item, product_type="S1_RTC") for item in items]
+
+
+def read_s1_rtc_cog(
+    product: ProductRef,
+    grid: Any,
+    *,
+    polarizations: tuple[str, ...] = ("VV", "VH"),
+    output_units: str = "linear",
+) -> xr.Dataset:
+    """Read one STAC Sentinel-1 RTC scene's gamma0 bands directly onto ``grid``.
+
+    Assets are linear-power gamma0 COGs named by lower-case polarization
+    (``vv``/``vh``). Backscatter is area-averaged in linear power, which is
+    also the appropriate speckle-reducing aggregation. Not yet validated
+    against a real live scene - see docs/roadmap.md.
+    """
+
+    from .cog import asset_scale_offset, observation_time, read_cog_to_grid, sign_href
+
+    if output_units not in {"linear", "dB"}:
+        raise ValueError("output_units must be 'linear' or 'dB'")
+    assets = product.metadata.get("assets", {})
+    variables: dict[str, tuple[tuple[str, str], np.ndarray]] = {}
+    for polarization in polarizations:
+        asset = assets.get(polarization.lower()) or assets.get(polarization)
+        if asset is None:
+            continue
+        _, _, nodata = asset_scale_offset(asset)
+        values = read_cog_to_grid(sign_href(asset["href"]), grid, resampling="average", nodata=nodata)
+        if output_units == "dB":
+            values = 10.0 * np.log10(np.maximum(values, np.finfo(np.float32).tiny))
+        variables[f"gamma0_{polarization}"] = (("y", "x"), values.astype(np.float32))
+    if not variables:
+        raise ValueError(f"Product {product.product_id!r} has none of the polarization assets {polarizations}")
+    dataset = xr.Dataset(variables, coords={"x": grid.x, "y": grid.y}).expand_dims(time=[observation_time(product)])
+    dataset.attrs.update({
+        "source": product.product_id,
+        "sensor": "Sentinel-1 SAR",
+        "product_type": "S1_RTC",
+        "processing_level": "Planetary Computer RTC",
+        "backscatter_quantity": "gamma0",
+        "units": output_units,
+        "crs": grid.crs,
+        "grid_id": grid.grid_id,
+    })
+    valid = xr.ones_like(next(iter(dataset.data_vars.values())), dtype=bool)
+    for value in dataset.data_vars.values():
+        valid &= np.isfinite(value)
+        value.attrs.update({"quantity": "gamma0", "units": output_units})
+    dataset["valid_mask"] = valid.rename("valid_mask")
+    return apply_variable_contract(dataset, sensor="Sentinel-1", product="S1_RTC", source=product.product_id)

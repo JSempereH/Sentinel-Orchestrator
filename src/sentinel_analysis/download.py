@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Iterable
 from threading import Lock
 import time
 import zipfile
@@ -66,7 +67,33 @@ class CDSEDownloader:
             destination = destination / filename
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists() and destination.stat().st_size > 0 and (self.cache is None or self.cache.valid(product.product_id, destination)):
+        return self._fetch(
+            product.download_url, destination, product.product_id,
+            metadata={"name": product.name, "product_type": product.product_type},
+        )
+
+    def download_files(self, product: ProductRef, names: Iterable[str], output_dir: str | Path) -> Path:
+        """Download only some files of a product, laid out as its SAFE directory.
+
+        Uses CDSE's OData ``Nodes`` endpoint
+        (``Products(<id>)/Nodes(<product>)/Nodes(<file>)/$value``), so e.g.
+        the ~16 MB an SLSTR LST analysis reads are fetched instead of the
+        ~70 MB archive. Returns ``output_dir/<product name>``, which every
+        SAFE reader here accepts like an extracted archive.
+        """
+
+        root = Path(output_dir) / product.name
+        root.mkdir(parents=True, exist_ok=True)
+        base = product.download_url.rsplit("/$value", 1)[0]
+        for name in names:
+            url = f"{base}/Nodes({product.name})/Nodes({name})/$value"
+            self._fetch(url, root / name, f"{product.product_id}/{name}", metadata={"name": product.name, "file": name})
+        return root
+
+    def _fetch(self, url: str, destination: Path, cache_key: str, *, metadata: dict) -> Path:
+        """Resumable, retried, token-refreshing transfer of one URL."""
+
+        if destination.exists() and destination.stat().st_size > 0 and (self.cache is None or self.cache.valid(cache_key, destination)):
             return destination
 
         partial = destination.with_suffix(destination.suffix + ".part")
@@ -78,11 +105,11 @@ class CDSEDownloader:
             if offset:
                 headers["Range"] = f"bytes={offset}-"
             try:
-                with self.session.get(product.download_url, headers=headers, stream=True, timeout=timeout) as response:
+                with self.session.get(url, headers=headers, stream=True, timeout=timeout) as response:
                     if response.status_code == 401:
                         self._token = None
                         headers["Authorization"] = f"Bearer {self._access_token()}"
-                        with self.session.get(product.download_url, headers=headers, stream=True, timeout=timeout) as refreshed:
+                        with self.session.get(url, headers=headers, stream=True, timeout=timeout) as refreshed:
                             response = refreshed
                             response.raise_for_status()
                             mode = "ab" if offset and response.status_code == 206 else "wb"
@@ -101,7 +128,7 @@ class CDSEDownloader:
                 time.sleep(min(60, 2**attempt))
         partial.replace(destination)
         if self.cache:
-            self.cache.record(product.product_id, destination, metadata={"name": product.name, "product_type": product.product_type})
+            self.cache.record(cache_key, destination, metadata=metadata)
         return destination
 
     @staticmethod

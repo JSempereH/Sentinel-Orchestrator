@@ -30,6 +30,31 @@ class LSTExceptionFlag(IntFlag):
 ALL_EXCEPTION_FLAGS = int(sum(flag.value for flag in LSTExceptionFlag))
 
 
+class LSTConfidenceFlag(IntFlag):
+    """``confidence_in`` bits (SLSTR Land Handbook, Table 6)."""
+
+    COASTLINE = 1 << 0
+    OCEAN = 1 << 1
+    TIDAL = 1 << 2
+    LAND = 1 << 3
+    INLAND_WATER = 1 << 4
+    UNFILLED = 1 << 5
+    COSMETIC = 1 << 8
+    DUPLICATE = 1 << 9
+    DAY = 1 << 10
+    TWILIGHT = 1 << 11
+    SUN_GLINT = 1 << 12
+    SNOW = 1 << 13
+    SUMMARY_CLOUD = 1 << 14
+    SUMMARY_POINTING = 1 << 15
+
+
+# Pixels that are not genuine, independent observations: unfilled, filled
+# cosmetically from neighbours, or duplicated by the instrument-grid
+# regridding (a duplicate would count twice in area-weighted aggregation).
+DEFAULT_CONFIDENCE_REJECT = int(LSTConfidenceFlag.UNFILLED | LSTConfidenceFlag.COSMETIC | LSTConfidenceFlag.DUPLICATE)
+
+
 @dataclass(frozen=True)
 class QualityPolicy:
     """Explicit quality policy; no physical-temperature cutoff is implicit."""
@@ -39,6 +64,13 @@ class QualityPolicy:
     reject_nonfinite: bool = True
     legacy_confidence_cloud_bit: int | None = None
     cloud_flag_mask: int | None = None
+    reject_confidence: int = DEFAULT_CONFIDENCE_REJECT
+    # SLSTR views reach ~55 degrees at the swath edges, where angular
+    # anisotropy biases LST; 45 degrees is the common practical cut.
+    max_view_zenith: float | None = 45.0
+    # Dilate the cloud mask by this many pixels: cloud edges and shadows are
+    # the usual residual contamination of any cloud mask.
+    cloud_buffer_pixels: int = 0
 
     @classmethod
     def strict(cls) -> "QualityPolicy":
@@ -50,7 +82,7 @@ class QualityPolicy:
     def permissive(cls) -> "QualityPolicy":
         """Keep finite LST values while retaining quality variables."""
 
-        return cls(reject_exceptions=0, reject_cloud=False)
+        return cls(reject_exceptions=0, reject_cloud=False, reject_confidence=0, max_view_zenith=None)
 
 
 def _integer_flags(values: xr.DataArray) -> xr.DataArray:
@@ -110,13 +142,34 @@ def valid_mask(
     if policy.reject_exceptions and "exception_flags" in dataset:
         flags = _integer_flags(dataset["exception_flags"])
         valid &= (flags & int(policy.reject_exceptions)) == 0
+    cloudy = xr.zeros_like(lst, dtype=bool)
     if policy.reject_cloud and "cloud_mask" in dataset:
-        valid &= ~dataset["cloud_mask"].astype(bool)
+        cloudy |= dataset["cloud_mask"].astype(bool)
     cloud_flag_mask = policy.cloud_flag_mask or policy.legacy_confidence_cloud_bit
     if policy.reject_cloud and "cloud_flags" in dataset and cloud_flag_mask:
-        flags = _integer_flags(dataset["cloud_flags"])
-        valid &= (flags & cloud_flag_mask) == 0
+        cloudy |= (_integer_flags(dataset["cloud_flags"]) & cloud_flag_mask) != 0
+    if policy.cloud_buffer_pixels > 0:
+        cloudy = _dilate(cloudy, policy.cloud_buffer_pixels)
+    valid &= ~cloudy
+    if policy.reject_confidence and "confidence_flags" in dataset:
+        valid &= (_integer_flags(dataset["confidence_flags"]) & int(policy.reject_confidence)) == 0
+    if policy.max_view_zenith is not None and "sat_zenith" in dataset:
+        valid &= dataset["sat_zenith"].fillna(90.0) <= policy.max_view_zenith
     return valid.rename("valid_mask")
+
+
+def _dilate(mask: xr.DataArray, pixels: int) -> xr.DataArray:
+    """8-connected binary dilation over the last two (y, x) dimensions."""
+
+    values = np.asarray(mask.values, dtype=bool)
+    for _ in range(pixels):
+        padded = np.pad(values, [(0, 0)] * (values.ndim - 2) + [(1, 1), (1, 1)])
+        grown = np.zeros_like(values)
+        for dy in (0, 1, 2):
+            for dx in (0, 1, 2):
+                grown |= padded[..., dy:dy + values.shape[-2], dx:dx + values.shape[-1]]
+        values = grown
+    return mask.copy(data=values)
 
 
 def apply_quality_mask(

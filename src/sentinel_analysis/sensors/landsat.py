@@ -31,6 +31,7 @@ from ..config import AOI
 from ..cube import AnalysisGrid
 from ..metadata import apply_variable_contract
 from ..stac import STACCatalog, STACItem
+from .cog import read_cog_to_grid, sign_href
 from .sentinel3.processing import to_celsius
 
 PC_STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
@@ -104,29 +105,6 @@ class LandsatCatalog:
         return [_stac_item_to_product_ref(item) for item in items if "lwir11" in item.assets]
 
 
-def _read_and_reproject(href: str, grid: AnalysisGrid, *, categorical: bool, source_nodata: float | None):
-    import rasterio
-    from rasterio.warp import Resampling, reproject
-
-    with rasterio.open(href) as source:
-        data = source.read(1).astype(np.float64)
-        if source_nodata is not None:
-            data[data == source_nodata] = np.nan
-        destination = np.full((grid.height, grid.width), np.nan, dtype=np.float64)
-        reproject(
-            source=data,
-            destination=destination,
-            src_transform=source.transform,
-            src_crs=source.crs,
-            dst_transform=grid.transform,
-            dst_crs=grid.crs,
-            src_nodata=np.nan,
-            dst_nodata=np.nan,
-            resampling=Resampling.nearest if categorical else Resampling.bilinear,
-        )
-        return destination
-
-
 def read_landsat_lst(
     product: ProductRef,
     grid: AnalysisGrid,
@@ -139,13 +117,9 @@ def read_landsat_lst(
     ``rasterio.warp.reproject`` already does source-to-target resampling.
 
     Reads straight off Planetary Computer's signed remote URL (GDAL's
-    ``/vsicurl/` HTTP range-read support) - there is no local download step.
+    ``/vsicurl/` HTTP range-read support) - there is no local download step,
+    and only the blocks intersecting ``grid`` are fetched (see ``sensors/cog.py``).
     """
-
-    try:
-        import planetary_computer as pc
-    except ImportError as exc:
-        raise RuntimeError("Install sentinel-analysis[landsat] to read Landsat scenes") from exc
 
     assets = product.metadata.get("assets", {})
     lwir_asset = assets.get("lwir11")
@@ -158,15 +132,15 @@ def read_landsat_lst(
     offset = float(lwir_bands.get("offset", 0.0))
     lwir_nodata = lwir_bands.get("nodata")
 
-    lwir_href = pc.sign(lwir_asset["href"])
-    raw = _read_and_reproject(lwir_href, grid, categorical=False, source_nodata=lwir_nodata)
+    # float64 after the windowed read: DNs are exact in float32, but the
+    # scale/offset arithmetic below needs the extra precision.
+    raw = read_cog_to_grid(sign_href(lwir_asset["href"]), grid, resampling="bilinear", nodata=lwir_nodata).astype(np.float64)
     lst_kelvin = raw * scale + offset
 
     valid = np.isfinite(lst_kelvin)
     if qa_asset is not None:
         qa_bands = (qa_asset.get("raster:bands") or [{}])[0]
-        qa_href = pc.sign(qa_asset["href"])
-        qa_pixel = _read_and_reproject(qa_href, grid, categorical=True, source_nodata=qa_bands.get("nodata"))
+        qa_pixel = read_cog_to_grid(sign_href(qa_asset["href"]), grid, resampling="nearest", nodata=qa_bands.get("nodata"))
         # Nearest-resampled NaNs (edge of the reprojected frame) carry no
         # flag information - treat as "no data" rather than "flagged clear".
         qa_int = np.where(np.isfinite(qa_pixel), qa_pixel, 1).astype(np.int64)

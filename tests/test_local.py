@@ -844,13 +844,15 @@ def test_combine_sentinel3_regrids_each_acquisition_before_concatenating():
 
     grid = AnalysisGrid.from_bounds((500000, 2200000, 500400, 2200400), crs="EPSG:32613", resolution_m=200)
 
-    # Product A: 2x2 raw pixels, all falling in one grid cell (empirically
-    # cell [y=0, x=0] for this geometry - see the assertions below).
+    # Product A: 2x2 raw pixels in the south-west 200 m cell. grid.y runs
+    # north to south, so that is [y=1, x=0]. (This test used to expect
+    # [y=0, x=0] - it had been fitted "empirically" to the area method's
+    # north-south flip, since fixed.)
     product_a = _synthetic_l2_lst_product(
         time="2025-06-10", x=np.array([500050.0, 500150.0]), y=np.array([2200150.0, 2200050.0]), lst_value=300.0,
     )
     # Product B: a *different* native shape (2x3, not 2x2 - the real-world
-    # crash trigger), all falling in a different grid cell ([y=1, x=1]).
+    # crash trigger), all in the north-east cell, [y=0, x=1].
     product_b = _synthetic_l2_lst_product(
         time="2025-06-11",
         x=np.array([500250.0, 500300.0, 500350.0]),
@@ -864,14 +866,14 @@ def test_combine_sentinel3_regrids_each_acquisition_before_concatenating():
     lst = combined["lst"]
 
     # Time 0 (product A): its cell has A's value; B's cell is untouched.
-    assert lst.isel(time=0, y=0, x=0).item() == pytest.approx(300.0)
-    assert np.isnan(lst.isel(time=0, y=1, x=1).item())
+    assert lst.isel(time=0, y=1, x=0).item() == pytest.approx(300.0)
+    assert np.isnan(lst.isel(time=0, y=0, x=1).item())
 
     # Time 1 (product B): its cell has B's value, *not* a stale copy of A's
     # - this is what the pre-fix "reuse time=0 geolocation" bug got wrong
     # even when it didn't crash outright - and A's cell is untouched.
-    assert lst.isel(time=1, y=1, x=1).item() == pytest.approx(500.0)
-    assert np.isnan(lst.isel(time=1, y=0, x=0).item())
+    assert lst.isel(time=1, y=0, x=1).item() == pytest.approx(500.0)
+    assert np.isnan(lst.isel(time=1, y=1, x=0).item())
 
 
 def test_combine_sentinel3_single_product_unchanged():

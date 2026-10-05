@@ -21,6 +21,7 @@ import xarray as xr
 
 from ..catalog import ProductRef, _product_ref
 from ..config import AOI, ClientConfig
+from ..cube import AnalysisGrid
 from ..http import http_session
 from ..metadata import apply_variable_contract
 
@@ -220,6 +221,13 @@ def read_s2_l2a(
 ) -> xr.Dataset:
     """Read one Sentinel-2 L2A granule into a common xarray Dataset."""
 
+    if extract_dir is None and Path(path).suffix.lower() == ".zip":
+        # Extract into a directory that is removed again: the bands are read
+        # eagerly below, so nothing needs the extraction afterwards (an
+        # earlier version leaked one ~1 GB SAFE extraction per call).
+        with tempfile.TemporaryDirectory(prefix="sentinel2-safe-") as temporary:
+            return read_s2_l2a(path, config=config, extract_dir=temporary, aoi=aoi)
+
     rasterio, Resampling, from_origin, reproject = _require_rasterio()
     config = config or Sentinel2ReadConfig()
     root = _safe_root(path, extract_dir)
@@ -299,6 +307,13 @@ def read_s2_l1c(
     correction assumes a methane-free atmosphere and would attenuate or
     remove the SWIR absorption signature the detection relies on.
     """
+
+    if extract_dir is None and Path(path).suffix.lower() == ".zip":
+        # Extract into a directory that is removed again: the bands are read
+        # eagerly below, so nothing needs the extraction afterwards (an
+        # earlier version leaked one ~1 GB SAFE extraction per call).
+        with tempfile.TemporaryDirectory(prefix="sentinel2-safe-") as temporary:
+            return read_s2_l1c(path, config=config, extract_dir=temporary, aoi=aoi)
 
     rasterio, Resampling, from_origin, reproject = _require_rasterio()
     config = config or Sentinel2L1CReadConfig()
@@ -542,3 +557,144 @@ class Sentinel2Catalog:
             url = payload.get("@odata.nextLink")
             params = None
         return products
+
+
+SENTINEL2_STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
+SENTINEL2_STAC_COLLECTION = "sentinel-2-l2a"
+# Planetary Computer names L2A assets by band id, Earth Search by common name.
+_S2_ASSET_ALIASES = {
+    "B01": ("B01", "coastal"),
+    "B02": ("B02", "blue"),
+    "B03": ("B03", "green"),
+    "B04": ("B04", "red"),
+    "B05": ("B05", "rededge1"),
+    "B06": ("B06", "rededge2"),
+    "B07": ("B07", "rededge3"),
+    "B08": ("B08", "nir"),
+    "B8A": ("B8A", "nir08"),
+    "B09": ("B09", "nir09"),
+    "B11": ("B11", "swir16"),
+    "B12": ("B12", "swir22"),
+    "SCL": ("SCL", "scl"),
+}
+
+
+class Sentinel2STACCatalog:
+    """Search Sentinel-2 L2A cloud-optimized scenes through a STAC API.
+
+    The alternative to ``Sentinel2Catalog`` + a full SAFE download: assets are
+    read in place with ``read_s2_l2a_cog``, fetching only the blocks that
+    cover the analysis grid. Defaults to Planetary Computer; Earth Search
+    (``https://earth-search.aws.element84.com/v1``) uses the same collection id.
+    """
+
+    def __init__(self, *, endpoint: str = SENTINEL2_STAC_ENDPOINT, collection: str = SENTINEL2_STAC_COLLECTION, catalog: Any | None = None):
+        from ..stac import STACCatalog
+
+        self.collection = collection
+        self.catalog = catalog or STACCatalog(endpoint)
+
+    def search(
+        self,
+        aoi: AOI,
+        start: str | date | datetime,
+        end: str | date | datetime,
+        *,
+        cloud_cover_max: float | None = None,
+        limit: int = 100,
+    ) -> list[ProductRef]:
+        from .cog import stac_product_ref
+
+        start = start if isinstance(start, str) else start.isoformat()
+        end = end if isinstance(end, str) else end.isoformat()
+        aoi.as_extent()
+        query = {"eo:cloud_cover": {"lte": cloud_cover_max}} if cloud_cover_max is not None else None
+        items = self.catalog.search(
+            collections=[self.collection],
+            bbox=[aoi.west, aoi.south, aoi.east, aoi.north],
+            datetime_range=f"{start}/{end}",
+            query=query,
+            limit=limit,
+        )
+        return [stac_product_ref(item, product_type=SENTINEL2_PRODUCT_TYPE) for item in items]
+
+
+def _s2_asset(assets: dict[str, Any], band: str) -> dict[str, Any]:
+    for name in _S2_ASSET_ALIASES.get(band, (band,)):
+        if name in assets:
+            return assets[name]
+    raise KeyError(f"STAC item has no asset for Sentinel-2 band {band}")
+
+
+def _s2_cog_scale_offset(asset: dict[str, Any], properties: dict[str, Any]) -> tuple[float, float]:
+    """Reflectance = DN * scale + offset for one STAC asset.
+
+    Catalogues that publish ``raster:bands`` scale/offset (Earth Search) are
+    trusted as-is. Otherwise (Planetary Computer) the processing baseline
+    decides: from 04.00 onward DNs carry ESA's -1000 ``BOA_ADD_OFFSET`` (see
+    ``_read_radiometric_offsets``), earlier ones do not.
+    """
+
+    from .cog import asset_scale_offset
+
+    scale, offset, _ = asset_scale_offset(asset)
+    bands = asset.get("raster:bands") or []
+    if bands and "scale" in bands[0]:
+        return scale, offset
+    try:
+        baseline = float(properties.get("s2:processing_baseline", "0"))
+    except (TypeError, ValueError):
+        baseline = 0.0
+    dn_offset = -1000.0 if baseline >= 4.0 else 0.0
+    return 1 / 10000.0, dn_offset / 10000.0
+
+
+def read_s2_l2a_cog(
+    product: ProductRef,
+    grid: AnalysisGrid,
+    *,
+    bands: tuple[str, ...] = Sentinel2ReadConfig().bands,
+) -> xr.Dataset:
+    """Read one STAC Sentinel-2 L2A scene directly onto ``grid``.
+
+    Reflectance bands are area-averaged onto the grid and SCL is
+    nearest-sampled, matching what the SAFE path produces after
+    ``AnalysisWorkflow._to_grid``. Not yet validated against a real live
+    scene - see docs/roadmap.md.
+    """
+
+    from .cog import asset_scale_offset, observation_time, read_cog_to_grid, sign_href
+
+    assets = product.metadata.get("assets", {})
+    properties = product.metadata.get("properties", {})
+    variables: dict[str, tuple[tuple[str, str], np.ndarray]] = {}
+    for band in bands:
+        asset = _s2_asset(assets, band)
+        _, _, nodata = asset_scale_offset(asset)
+        values = read_cog_to_grid(
+            sign_href(asset["href"]),
+            grid,
+            resampling="nearest" if band == "SCL" else "average",
+            nodata=0 if nodata is None else nodata,
+        )
+        if band != "SCL":
+            scale, offset = _s2_cog_scale_offset(asset, properties)
+            values = values * np.float32(scale) + np.float32(offset)
+        variables[band] = (("y", "x"), values)
+
+    dataset = xr.Dataset(variables, coords={"x": grid.x, "y": grid.y}).expand_dims(time=[observation_time(product)])
+    dataset.attrs.update({
+        "product_name": product.name,
+        "sensor": "Sentinel-2 MSI",
+        "product_type": SENTINEL2_PRODUCT_TYPE,
+        "crs": grid.crs,
+        "grid_id": grid.grid_id,
+        "resolution_m": grid.resolution_m,
+        "reflectance_scale": "1/10000",
+        "acquisition": "stac_cog",
+    })
+    if "SCL" in dataset:
+        dataset["SCL"].attrs.update({"flag_values": list(S2_SCL_CLASSES), "flag_meanings": " ".join(S2_SCL_CLASSES.values())})
+        # NaN SCL (outside the scene footprint) is not a "clear" class.
+        dataset["valid_mask"] = scl_valid_mask(dataset["SCL"]) & np.isfinite(dataset["SCL"])
+    return apply_variable_contract(dataset, sensor="Sentinel-2", product=SENTINEL2_PRODUCT_TYPE, source=product.product_id)

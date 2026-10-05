@@ -26,6 +26,20 @@ class SpatialResamplingPolicy:
         return "mean" if source_resolution < target_resolution else "nearest"
 
 
+def _restore_boolean(source_dtype: np.dtype, regridded: xr.DataArray) -> xr.DataArray:
+    """Keep boolean masks boolean after regridding.
+
+    Regridding marks target cells outside the source footprint as NaN, which
+    turns a boolean mask into float - and ``NaN.astype(bool)`` is True, so a
+    later cast would silently mark every no-data cell as valid. Cells with
+    no source data are not valid: fill them with False.
+    """
+
+    if source_dtype.kind != "b":
+        return regridded
+    return regridded.fillna(0).astype(bool)
+
+
 def harmonize_spatial(
     target: xr.Dataset,
     source: xr.Dataset,
@@ -57,7 +71,14 @@ def harmonize_spatial(
                 from ..downscale import reaggregate_to_target
                 result[name] = reaggregate_to_target(value, template)
             else:
-                result[name] = value.reindex(x=target.x, y=target.y, method="nearest")
+                # Bound the nearest-neighbour search to half a source cell per
+                # axis so target cells outside the source footprint become
+                # missing instead of repeating the source's edge values.
+                source_dy = float(abs(source.y.values[1] - source.y.values[0])) if source.y.size > 1 else source_resolution
+                source_dtype = value.dtype
+                value = value.sortby("x").sortby("y")
+                value = value.reindex(x=target.x, method="nearest", tolerance=source_resolution / 2 * (1 + 1e-9))
+                result[name] = _restore_boolean(source_dtype, value.reindex(y=target.y, method="nearest", tolerance=source_dy / 2 * (1 + 1e-9)))
         return result
 
     try:
@@ -70,6 +91,11 @@ def harmonize_spatial(
         raise CubeValidationError("Both cubes must declare CRS before reprojection")
     if target.x.size < 2 or target.y.size < 2 or source.x.size < 2 or source.y.size < 2:
         raise CubeValidationError("Reprojection requires regular grids with at least two coordinates per axis")
+    # The transforms below place row 0 at the *top* (max y) and column 0 at
+    # the left, so the arrays must be north-up and west-to-east. Sources with
+    # ascending y - every grid_s5p output, latitude-ascending ERA5/CAMS files
+    # - were otherwise warped upside down.
+    source = source.sortby("x").sortby("y", ascending=False)
 
     def transform(data: xr.DataArray, *, method: str) -> xr.DataArray:
         dx = float(abs(source.x.values[1] - source.x.values[0]))
@@ -78,25 +104,43 @@ def harmonize_spatial(
         target_dy = float(abs(target.y.values[1] - target.y.values[0]))
         source_transform = from_origin(float(source.x.values.min() - dx / 2), float(source.y.values.max() + dy / 2), dx, dy)
         target_transform = from_origin(float(target.x.values.min() - target_dx / 2), float(target.y.values.max() + target_dy / 2), target_dx, target_dy)
-        values = data.transpose("time", "y", "x").values
-        output = np.full((values.shape[0], target.y.size, target.x.size), np.nan, dtype=np.float32)
-        for index, layer in enumerate(values):
-            reproject(
-                source=layer.astype(np.float32),
-                destination=output[index],
-                src_transform=source_transform,
-                src_crs=source_crs,
-                dst_transform=target_transform,
-                dst_crs=target_crs,
-                src_nodata=np.nan,
-                dst_nodata=np.nan,
-                resampling={"nearest": Resampling.nearest, "mean": Resampling.average}.get(method, Resampling.bilinear),
-            )
-        return xr.DataArray(output, dims=("time", "y", "x"), coords={"time": data.time, "y": target.y, "x": target.x}, name=data.name, attrs=data.attrs)
+        resampling = {"nearest": Resampling.nearest, "mean": Resampling.average}.get(method, Resampling.bilinear)
+        shape = (target.y.size, target.x.size)
+
+        def warp(values: np.ndarray) -> np.ndarray:
+            layers = values.reshape((-1, *values.shape[-2:]))
+            output = np.full((layers.shape[0], *shape), np.nan, dtype=np.float32)
+            for index, layer in enumerate(layers):
+                reproject(
+                    source=layer.astype(np.float32),
+                    destination=output[index],
+                    src_transform=source_transform,
+                    src_crs=source_crs,
+                    dst_transform=target_transform,
+                    dst_crs=target_crs,
+                    src_nodata=np.nan,
+                    dst_nodata=np.nan,
+                    resampling=resampling,
+                )
+            return output.reshape((*values.shape[:-2], *shape))
+
+        # apply_ufunc keeps dask-backed inputs lazy, warping one time chunk
+        # per task instead of materializing the whole source cube.
+        warped = xr.apply_ufunc(
+            warp,
+            data.transpose("time", "y", "x"),
+            input_core_dims=[["y", "x"]],
+            output_core_dims=[["y_target", "x_target"]],
+            dask="parallelized",
+            output_dtypes=[np.float32],
+            dask_gufunc_kwargs={"output_sizes": {"y_target": shape[0], "x_target": shape[1]}},
+            keep_attrs=True,
+        )
+        return warped.rename({"y_target": "y", "x_target": "x"}).assign_coords(y=target.y.values, x=target.x.values).rename(data.name)
 
     result = xr.Dataset(attrs={**source.attrs, "crs": target_crs, "grid_id": target.attrs.get("grid_id", "")})
     for name, value in source.data_vars.items():
         if set(("time", "y", "x")).issubset(value.dims):
             method = policy.for_variable(name, source_resolution=source_resolution, target_resolution=target_resolution, categorical=value.dtype.kind == "b")
-            result[name] = transform(value, method=method)
+            result[name] = _restore_boolean(value.dtype, transform(value, method=method))
     return result

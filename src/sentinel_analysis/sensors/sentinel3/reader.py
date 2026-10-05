@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import tempfile
+import warnings
 from typing import Iterable, Mapping
 import zipfile
 import xml.etree.ElementTree as ET
@@ -20,6 +21,13 @@ import numpy as np
 import xarray as xr
 
 from .quality import cf_flag_mask_array
+
+
+# The files an LST analysis needs: LST/uncertainty/exceptions, pixel
+# geolocation, quality and cloud flags, viewing geometry, and the manifest
+# (acquisition times). Everything else in an SL_2_LST product - notably the
+# ~38 MB met_tx.nc of a ~70 MB archive - is never read.
+SLSTR_LST_FILES = ("LST_in.nc", "geodetic_in.nc", "flags_in.nc", "geometry_tn.nc", "xfdumanifest.xml")
 
 
 class ProductFormatError(ValueError):
@@ -123,9 +131,30 @@ def _product_root(path: str | Path, extract_dir: str | Path | None = None) -> Pa
     return products[0] if len(products) == 1 else destination
 
 
+def _extract_members(archive: Path, destination: Path, wanted: Iterable[str] = SLSTR_LST_FILES) -> Path:
+    """Safely extract only the known LST files (or every NetCDF if the
+    archive uses an unknown layout) and return the product root."""
+
+    wanted = set(wanted)
+    root = destination.resolve()
+    with zipfile.ZipFile(archive) as zipped:
+        members = [member for member in zipped.infolist() if not member.is_dir()]
+        selected = [member for member in members if Path(member.filename).name in wanted]
+        if not any(Path(member.filename).name.endswith(".nc") for member in selected):
+            selected = [member for member in members if member.filename.endswith((".nc", ".xml", ".safe"))]
+        for member in selected:
+            target = (destination / member.filename).resolve()
+            if target != root and root not in target.parents:
+                raise ProductFormatError(f"Unsafe archive member: {member.filename}")
+            zipped.extract(member, destination)
+    products = list(destination.glob("*.SEN3"))
+    return products[0] if len(products) == 1 else destination
+
+
 def _open_files(root: Path, chunks: Mapping[str, int] | None) -> list[tuple[Path, xr.Dataset]]:
     opened: list[tuple[Path, xr.Dataset]] = []
-    for path in sorted(root.rglob("*.nc")):
+    known = [path for name in SLSTR_LST_FILES if name.endswith(".nc") for path in root.rglob(name)]
+    for path in sorted(known) if known else sorted(root.rglob("*.nc")):
         try:
             dataset = xr.open_dataset(path, decode_cf=True, mask_and_scale=True, chunks=chunks)
         except Exception:
@@ -135,6 +164,70 @@ def _open_files(root: Path, chunks: Mapping[str, int] | None) -> list[tuple[Path
         else:
             dataset.close()
     return opened
+
+
+def _across_track_resolution(value) -> float:
+    """First element of a ``resolution`` attribute. Real SLSTR files store it
+    as the string ``'[ 16000 1000 ]'``, not as a numeric array."""
+
+    if isinstance(value, str):
+        numbers = re.findall(r"[-+]?\d+(?:\.\d+)?", value)
+        if not numbers:
+            raise ValueError(f"unparseable resolution attribute {value!r}")
+        return float(numbers[0])
+    return float(np.atleast_1d(value)[0])
+
+
+def _sat_zenith_on_image_grid(opened: list[tuple[Path, xr.Dataset]], selected: Mapping[str, xr.DataArray]) -> xr.DataArray | None:
+    """Interpolate the tie-point ``sat_zenith_tn`` onto the 1 km image grid.
+
+    Tie points share the image rows but sample columns every 16 km. Each
+    file's ``track_offset`` (in its own column units) and ``resolution``
+    attributes place both grids on one across-track axis, so image column
+    ``i`` sits at tie-point column ``tie_offset + (i - image_offset) *
+    image_res / tie_res``.
+    """
+
+    geometry = next((dataset for path, dataset in opened if "sat_zenith_tn" in dataset.data_vars), None)
+    image = next((dataset for path, dataset in opened if "latitude_in" in dataset.data_vars), None)
+    if geometry is None or image is None or "lst" not in selected:
+        return None
+    try:
+        tie_offset = float(geometry.attrs["track_offset"])
+        image_offset = float(image.attrs["track_offset"])
+        tie_resolution = _across_track_resolution(geometry.attrs["resolution"])
+        image_resolution = _across_track_resolution(image.attrs["resolution"])
+    except (KeyError, TypeError, ValueError, IndexError) as exc:
+        warnings.warn(f"Could not place SLSTR tie points on the image grid ({exc}); sat_zenith is unavailable", stacklevel=2)
+        return None
+    tie = geometry["sat_zenith_tn"].values
+    n_columns = selected["lst"].sizes.get("columns", selected["lst"].shape[-1])
+    if tie.shape[0] != selected["lst"].shape[0]:
+        return None
+    position = tie_offset + (np.arange(n_columns) - image_offset) * image_resolution / tie_resolution
+    left = np.clip(np.floor(position).astype(int), 0, tie.shape[1] - 1)
+    right = np.clip(left + 1, 0, tie.shape[1] - 1)
+    fraction = np.clip(position - left, 0.0, 1.0)
+    values = tie[:, left] * (1 - fraction) + tie[:, right] * fraction
+    values[:, (position < 0) | (position > tie.shape[1] - 1)] = np.nan
+    return xr.DataArray(values.astype(np.float32), dims=selected["lst"].dims[-2:], name="sat_zenith", attrs={"units": "degree", "long_name": "satellite view zenith angle"})
+
+
+def _crop_to_aoi(dataset: xr.Dataset, aoi, margin_deg: float) -> xr.Dataset:
+    """Keep the smallest row/column window covering ``aoi`` plus a margin."""
+
+    if aoi is None or "latitude" not in dataset or "longitude" not in dataset:
+        return dataset
+    latitude = dataset["latitude"].squeeze(drop=True).values
+    longitude = dataset["longitude"].squeeze(drop=True).values
+    inside = (
+        (latitude >= aoi.south - margin_deg) & (latitude <= aoi.north + margin_deg)
+        & (longitude >= aoi.west - margin_deg) & (longitude <= aoi.east + margin_deg)
+    )
+    if not inside.any():
+        return dataset.isel(y=slice(0, 0), x=slice(0, 0))
+    rows, cols = np.nonzero(inside)
+    return dataset.isel(y=slice(rows.min(), rows.max() + 1), x=slice(cols.min(), cols.max() + 1))
 
 
 def _standard_dataset(root: Path, opened: list[tuple[Path, xr.Dataset]], metadata: ProductMetadata) -> xr.Dataset:
@@ -165,11 +258,32 @@ def _standard_dataset(root: Path, opened: list[tuple[Path, xr.Dataset]], metadat
             selected[standard_name].attrs["source_file"] = path.name
             selected_paths.add(path)
 
+    # Prefer the exact SLSTR flag variables over fuzzy matching: flags_in.nc
+    # carries both ``cloud_in`` (individual threshold tests) and ``bayes_in``
+    # (the Bayesian cloud mask), whose names/long names overlap.
+    for path, dataset in opened:
+        for exact, standard_name in (("cloud_in", "cloud_flags"), ("bayes_in", "bayes_flags"), ("confidence_in", "confidence_flags")):
+            if exact in dataset.data_vars:
+                selected[standard_name] = dataset[exact].rename(standard_name)
+                selected[standard_name].attrs["source_file"] = path.name
+                selected_paths.add(path)
+
+    sat_zenith = _sat_zenith_on_image_grid(opened, selected)
+    if sat_zenith is not None:
+        selected["sat_zenith"] = sat_zenith
+
     if "lst" not in selected:
         available = [f"{path.name}: {list(dataset.data_vars)}" for path, dataset in opened]
         raise ProductFormatError("Could not identify an LST variable. Available variables: " + "; ".join(available))
 
-    if "cloud_flags" in selected:
+    if "bayes_flags" in selected:
+        # ESA's recommended cloud screening for SLSTR LST. On real Berlin
+        # scenes the ``cloud_in`` subset below let most clouds through
+        # (cloud-flagged pixels ~10-15 degC colder than the "clear" ones were
+        # kept), while ``single_moderate`` separated them cleanly.
+        selected["cloud_mask"] = cf_flag_mask_array(selected["bayes_flags"], meanings=("single_moderate",)).rename("cloud_mask")
+        selected["cloud_mask"].attrs["cloud_mask_source"] = "bayes_in:single_moderate"
+    elif "cloud_flags" in selected:
         if selected["cloud_flags"].dtype.kind == "b":
             selected["cloud_mask"] = selected["cloud_flags"].astype(bool).rename("cloud_mask")
         else:
@@ -214,10 +328,49 @@ def read_l2_lst(
     *,
     chunks: Mapping[str, int] | None = None,
     extract_dir: str | Path | None = None,
+    aoi=None,
+    aoi_margin_deg: float = 0.1,
 ) -> xr.Dataset:
-    """Read a SAFE directory or ZIP into a standardized lazy xarray Dataset."""
+    """Read a SAFE directory or ZIP into a standardized xarray Dataset.
 
-    root = _product_root(path, extract_dir)
+    A ZIP is no longer extracted whole into a temporary directory that is
+    never removed (an earlier version leaked one ~100 MB directory per read
+    into /tmp): only the files in ``SLSTR_LST_FILES`` are extracted into a
+    temporary directory, the data are loaded into memory and the directory
+    is deleted before returning. Pass ``extract_dir`` to keep an extraction,
+    or a directory to read lazily in place.
+
+    With ``aoi``, the swath is cropped to the rows/columns covering the AOI
+    plus ``aoi_margin_deg`` - a city needs a few thousand of a swath's
+    ~1.8 million pixels.
+    """
+
+    path = Path(path)
+    if path.is_dir() or extract_dir is not None:
+        full = _read_root(_product_root(path, extract_dir), chunks)
+        if aoi is None:
+            return full  # lazy; closing it closes the underlying files
+        return _load_and_close(full, aoi, aoi_margin_deg)
+    if path.suffix.lower() != ".zip":
+        raise FileNotFoundError(f"Expected a SAFE directory or ZIP archive: {path}")
+    with tempfile.TemporaryDirectory(prefix="sentinel-analysis-sentinel3-") as temporary:
+        return _load_and_close(_read_root(_extract_members(path, Path(temporary)), None), aoi, aoi_margin_deg)
+
+
+def _load_and_close(full: xr.Dataset, aoi, aoi_margin_deg: float) -> xr.Dataset:
+    """Load the (cropped) data into memory and close the *full* dataset's
+    files. Closing only the cropped view leaves every opened NetCDF - and
+    the arrays already read from it - alive, ~80 MB per product."""
+
+    try:
+        # deep copy: ``isel`` of in-memory arrays returns NumPy *views*, and
+        # a 50 x 48 view keeps the whole 1200 x 1500 swath array alive.
+        return _crop_to_aoi(full, aoi, aoi_margin_deg).load().copy(deep=True)
+    finally:
+        full.close()
+
+
+def _read_root(root: Path, chunks: Mapping[str, int] | None) -> xr.Dataset:
     metadata = _metadata(root)
     opened = _open_files(root, chunks)
     if not opened:
@@ -228,14 +381,16 @@ def read_l2_lst(
 def inspect_l2_lst(path: str | Path) -> dict[str, object]:
     """Inspect a product without requiring a known baseline-specific layout."""
 
-    root = _product_root(path)
-    opened = _open_files(root, None)
-    metadata = _metadata(root)
-    try:
-        return {
-            "metadata": metadata,
-            "files": {str(file): list(dataset.data_vars) for file, dataset in opened},
-        }
-    finally:
-        for _, dataset in opened:
-            dataset.close()
+    path = Path(path)
+    with tempfile.TemporaryDirectory(prefix="sentinel-analysis-sentinel3-") as temporary:
+        root = path if path.is_dir() else _extract_members(path, Path(temporary))
+        opened = _open_files(root, None)
+        metadata = _metadata(root)
+        try:
+            return {
+                "metadata": metadata,
+                "files": {str(file.relative_to(root)): list(dataset.data_vars) for file, dataset in opened},
+            }
+        finally:
+            for _, dataset in opened:
+                dataset.close()

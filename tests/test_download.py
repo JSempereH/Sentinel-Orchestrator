@@ -102,3 +102,36 @@ def test_cdse_downloader_resumes_partial_download(tmp_path: Path):
 
     assert path.read_bytes() == b"netcdf"
     assert session.calls[1]["headers"]["Range"] == "bytes=3-"
+
+
+def test_download_files_fetches_individual_product_files_through_odata_nodes(tmp_path: Path):
+    class NodesSession(_Session):
+        def __init__(self):
+            self.urls = []
+
+        def get(self, url, *args, **kwargs):
+            self.urls.append(url)
+            return _Response(chunks=(url.split("Nodes(")[-1].split(")")[0].encode(),))
+
+    session = NodesSession()
+    product = ProductRef(
+        product_id="abc-123",
+        name="S3A_SL_2_LST____X.SEN3",
+        product_type="SL_2_LST___",
+        start_datetime=None,
+        end_datetime=None,
+        timeliness="NT",
+        online=True,
+        download_url="https://download.example/odata/v1/Products(abc-123)/$value",
+        metadata={},
+    )
+    downloader = CDSEDownloader(ClientConfig(client_id="id", client_secret="secret"), session=cast(Any, session))
+
+    root = downloader.download_files(product, ["LST_in.nc", "flags_in.nc"], tmp_path)
+
+    assert root == tmp_path / product.name
+    assert session.urls == [
+        "https://download.example/odata/v1/Products(abc-123)/Nodes(S3A_SL_2_LST____X.SEN3)/Nodes(LST_in.nc)/$value",
+        "https://download.example/odata/v1/Products(abc-123)/Nodes(S3A_SL_2_LST____X.SEN3)/Nodes(flags_in.nc)/$value",
+    ]
+    assert (root / "flags_in.nc").read_bytes() == b"flags_in.nc"
