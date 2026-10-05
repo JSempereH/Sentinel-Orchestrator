@@ -7,13 +7,8 @@ files a client can download.
 
 It also fills a gap between what the platform's UI naturally has (an
 arbitrary drawn AOI + a target resolution in metres) and what
-AnalysisRequest needs (a projected AnalysisGrid). sentinel_analysis itself
-only derives a grid automatically for one of its five preset CitySpecs
-(AnalysisRequest.for_city); for any other AOI, something has to pick a
-projected CRS and snap a grid to it. That's done here, the same way
-AnalysisGrid.for_city does it internally (reproject the AOI corners to a
-metric CRS, then AnalysisGrid.from_bounds) - just with a computed UTM zone
-instead of a preset one.
+AnalysisRequest needs (a projected AnalysisGrid): AnalysisGrid.for_aoi
+snaps a grid in the AOI's UTM zone.
 """
 
 from pathlib import Path
@@ -22,41 +17,12 @@ from typing import Callable
 from sentinel_analysis.config import AOI, ClientConfig
 from sentinel_analysis.cube import AnalysisGrid
 from sentinel_analysis.providers import AuxiliarySpec
-from sentinel_analysis.storage import write_zarr
 from sentinel_analysis.workflow.request import AnalysisRequest
 from sentinel_analysis.workflow.runner import AnalysisWorkflow
 
 from .config import settings
 
 ProgressCallback = Callable[[str, int, int], None]
-
-
-def _utm_epsg(lon: float, lat: float) -> str:
-    """Standard UTM zone for a WGS84 lon/lat (6-degree zones, N/S hemisphere)."""
-
-    zone = int((lon + 180) // 6) % 60 + 1
-    return f"EPSG:{(32600 if lat >= 0 else 32700) + zone}"
-
-
-def _projected_bounds(aoi: AOI, crs: str) -> tuple[float, float, float, float]:
-    from pyproj import Transformer
-
-    transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-    corners = [
-        transformer.transform(x, y)
-        for x, y in (
-            (aoi.west, aoi.south),
-            (aoi.west, aoi.north),
-            (aoi.east, aoi.south),
-            (aoi.east, aoi.north),
-        )
-    ]
-    return (
-        min(x for x, _ in corners),
-        min(y for _, y in corners),
-        max(x for x, _ in corners),
-        max(y for _, y in corners),
-    )
 
 
 def build_request(request_dict: dict) -> AnalysisRequest:
@@ -80,10 +46,8 @@ def build_request(request_dict: dict) -> AnalysisRequest:
     resolution_m = float(payload.get("resolution_m", 100))
     thermal_resolution_m = float(payload.get("thermal_resolution_m", max(1000.0, resolution_m)))
 
-    crs = _utm_epsg((aoi.west + aoi.east) / 2, (aoi.south + aoi.north) / 2)
-    bounds = _projected_bounds(aoi, crs)
-    predictor_grid = AnalysisGrid.from_bounds(bounds, crs=crs, resolution_m=resolution_m)
-    thermal_grid = AnalysisGrid.from_bounds(bounds, crs=crs, resolution_m=thermal_resolution_m)
+    predictor_grid = AnalysisGrid.for_aoi(aoi, resolution_m=resolution_m)
+    thermal_grid = AnalysisGrid.for_aoi(aoi, resolution_m=thermal_resolution_m, crs=predictor_grid.crs)
 
     return AnalysisRequest(
         aoi=aoi,
@@ -101,6 +65,9 @@ def build_request(request_dict: dict) -> AnalysisRequest:
         s2_composite_method=payload.get("s2_composite_method"),
         s2_min_observations=payload.get("s2_min_observations", 1),
         sentinel1_backend=payload.get("sentinel1_backend", "snap"),
+        sentinel2_source=payload.get("sentinel2_source", "cdse_safe"),
+        raw_retention=payload.get("raw_retention", "aoi_subset"),
+        terrain_predictors=bool(payload.get("terrain_predictors", False)),
         auxiliary=tuple(AuxiliarySpec.from_dict(item) for item in payload.get("auxiliary", ())),
     )
 
@@ -125,14 +92,4 @@ def execute_and_persist(
         progress=progress_cb,
     )
 
-    result_dir = output_root / job_id / "result"
-    result_dir.mkdir(parents=True, exist_ok=True)
-    write_zarr(result.cube, result_dir / "cube.zarr")
-    if result.thermal_cube is not None:
-        write_zarr(result.thermal_cube, result_dir / "thermal_cube.zarr")
-    if result.predictor_cube is not None:
-        write_zarr(result.predictor_cube, result_dir / "predictor_cube.zarr")
-    if result.auxiliary:
-        for name, dataset in result.auxiliary.items():
-            write_zarr(dataset, result_dir / "auxiliary" / f"{name}.zarr")
-    return result_dir
+    return result.save(output_root / job_id / "result")

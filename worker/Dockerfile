@@ -34,7 +34,10 @@ COPY src /app/src
 # `cloud` is required, not optional here: execute_and_persist() always
 # writes the result cube(s) via write_zarr() - a run that reaches
 # SUCCEEDED without it just fails at the last step instead.
-RUN pip install --no-cache-dir ".[cdse,auxiliary,optical,sar,cloud,hyp3]"
+# `landsat` (planetary-computer) signs Planetary Computer asset URLs: the
+# "landsat" sensor, sentinel1_backend="pc_rtc" and sentinel2_source=
+# "stac_cog" all fail without it.
+RUN pip install --no-cache-dir ".[cdse,auxiliary,optical,sar,cloud,hyp3,landsat]"
 
 # the worker service
 COPY worker/requirements.txt /app/worker/requirements.txt

@@ -25,7 +25,7 @@ jobs:
       # "passed" - this pipeline was staying green without actually
       # exercising most of the library.
       - name: Install dependencies
-        run: uv sync --extra dev --extra auxiliary --extra optical --extra ml --extra landsat --extra ecostress --extra cdse --extra hyp3
+        run: uv sync --extra dev --extra auxiliary --extra optical --extra ml --extra landsat --extra ecostress --extra cdse --extra hyp3 --extra cloud --extra odc --extra geo
 
       - name: Lint (ruff)
         run: uv run ruff check .

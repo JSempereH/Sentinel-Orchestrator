@@ -108,3 +108,34 @@ def test_download_before_success_returns_409(client, auth_headers, monkeypatch):
     assert download.status_code == 409
 
     ready.set()
+
+
+def test_jobs_beyond_the_concurrency_limit_wait_as_pending(client, auth_headers, monkeypatch, tmp_path):
+    release = threading.Event()
+    running = []
+
+    def fake_execute(job_id, request_dict, *, output_root, progress_cb=None):
+        running.append(job_id)
+        release.wait(timeout=5)
+        return tmp_path
+
+    monkeypatch.setattr(jobs, "execute_and_persist", fake_execute)
+    monkeypatch.setattr(jobs, "_run_slots", threading.BoundedSemaphore(1))
+
+    first = client.post("/jobs", json=_fake_request_dict(), headers=auth_headers).json()["job_id"]
+    second = client.post("/jobs", json=_fake_request_dict(), headers=auth_headers).json()["job_id"]
+    for _ in range(50):
+        if running:
+            break
+        time.sleep(0.02)
+    time.sleep(0.1)
+
+    assert running == [first]
+    assert client.get(f"/jobs/{second}", headers=auth_headers).json()["status"] == "PENDING"
+
+    release.set()
+    for _ in range(100):
+        if client.get(f"/jobs/{second}", headers=auth_headers).json()["status"] == "SUCCEEDED":
+            break
+        time.sleep(0.05)
+    assert running == [first, second]
