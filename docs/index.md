@@ -22,17 +22,20 @@ as modeled.
 
 - Canonical package: `sentinel_analysis`.
 - Sentinel-3: `Sentinel3LST` for local processing and `Sentinel3LSTClient` for openEO.
-- Sentinel-1: three `sentinel1_backend` options - `"snap"` (default, local
-  SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud RTC, no SNAP needed), `"s1ard"`
-  (pyroSAR NRB, currently broken - see `roadmap.md`).
+- Sentinel-1: four `sentinel1_backend` options - `"snap"` (default, local
+  SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud RTC, no SNAP needed), `"pc_rtc"`
+  (Planetary Computer RTC COGs read in place, pending real-scene
+  validation), `"s1ard"` (pyroSAR NRB, currently broken - see `roadmap.md`).
+- Sentinel-2: full SAFE downloads from CDSE (default) or
+  `sentinel2_source="stac_cog"` windowed COG reads (pending real-scene validation).
 - Independent thermal references: Landsat 8/9 (`sensors/landsat.py`) and
   ECOSTRESS (`sensors/ecostress.py`), alongside Sentinel-3's own `lst`.
-- Downscaling/fusion (`downscale.py`): OLS/TsHARP, Random Forest, XGBoost,
+- Downscaling/fusion (`downscale/`): OLS/TsHARP, Random Forest, XGBoost,
   GWR (geographically weighted regression), and STARFM/ESTARFM
   spatiotemporal fusion - see `downscaling.md` for what's validated on
   real data versus synthetic-only.
 - Auxiliary sources: `providers/era5.py`, `providers/cams.py`, and `providers/openaq.py`.
-- Cache: SHA-256 checksums and a JSON manifest for each download.
+- Cache: SHA-256 checksums plus size/mtime in a JSON manifest; files are re-hashed only when their size or mtime changes.
 - `worker/`: an optional FastAPI service (+ bundled UI) that runs
   `AnalysisWorkflow.execute()` as a submit/poll/download job over HTTP -
   see `platform.md`.

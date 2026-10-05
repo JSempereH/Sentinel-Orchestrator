@@ -57,26 +57,38 @@ uv run sentinel-analysis discover request.json
 uv run sentinel-analysis auxiliary request.json output/auxiliary
 ```
 
+And run a request end to end, writing the cubes as Zarr:
+
+```bash
+uv run --extra optical --extra cloud sentinel-analysis run request.json output/run
+```
+
 ---
 
 ## Architecture
 
 ```text
 src/sentinel_analysis/
-  sensors/       Sentinel-1/2/3/5P, Landsat 8/9, and ECOSTRESS adapters
+  sensors/       Sentinel-1/2/3/5P, Landsat 8/9, and ECOSTRESS readers/catalogs
   providers/     ERA5, CAMS, and OpenAQ
-  workflow/      requests, planning, downloads, fusion, and results
-  downscale.py   OLS/TsHARP, Random Forest, XGBoost, GWR, STARFM/ESTARFM
-  cube.py        grids and the spatial contract
+  workflow/      requests, planning, per-sensor adapters, fusion, and results
+  downscale/     OLS/TsHARP, any scikit-learn estimator (RF, XGBoost), GWR,
+                 coarse-scale conservation, STARFM/ESTARFM
+  cube.py        grids (incl. AnalysisGrid.for_aoi) and the spatial contract
   metadata.py    units, provenance, and scientific contracts
 ```
 
-Sentinel-1 has three interchangeable `sentinel1_backend` options -
+Sentinel-1 has four interchangeable `sentinel1_backend` options -
 `"snap"` (default, local SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud
-processing, no SNAP needed), and `"s1ard"` (pyroSAR NRB, currently broken
-- see `docs/roadmap.md`). Landsat/ECOSTRESS are independent thermal
+processing, no SNAP needed), `"pc_rtc"` (Planetary Computer's pre-processed
+RTC COGs, read in place - not yet validated on a real scene), and `"s1ard"`
+(pyroSAR NRB, currently broken - see `docs/roadmap.md`). Sentinel-2 can
+likewise be read in place from STAC COGs with `sentinel2_source="stac_cog"`
+instead of downloading full SAFE archives (also pending real-scene
+validation). Each sensor's search/acquisition lives in one adapter in
+`workflow/adapters.py`. Landsat/ECOSTRESS are independent thermal
 references used as validation/predictors alongside Sentinel-3's own `lst`.
-`downscale.py`'s models turn a coarse thermal field into a fine-resolution
+`downscale/`'s models turn a coarse thermal field into a fine-resolution
 one using Sentinel-2 predictors - see
 [`docs/downscaling.md`](docs/downscaling.md) for what's validated on real
 data versus synthetic-only.

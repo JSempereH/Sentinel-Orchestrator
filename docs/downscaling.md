@@ -130,6 +130,33 @@ Report RMSE, MAE, bias, correlation, high-temperature error, valid coverage,
 coarse-scale conservation error and calibrated uncertainty coverage. Report
 metrics separately for vegetation, impervious, water and mixed urban pixels.
 
+`blocked_spatiotemporal_split` holds out the latest `validation_fraction` of
+acquisitions and a diagonal pattern of `block_size` x `block_size` pixel
+blocks. Its default `block_size=1` holds out single pixels whose direct
+neighbours all stay in training, which spatial autocorrelation makes
+optimistic; pass a block several kilometres wide (`block_size=5` on a 1 km
+thermal grid) for a genuinely spatial test. The split refuses an unsorted
+time index, since "the latest acquisitions" is taken by position (cubes
+produced before the time-ordering fix were unsorted, so earlier benchmark
+runs' temporal holdout was not the final period - see `roadmap.md`).
+
+### Calibrated prediction intervals
+
+`fit_conformal_downscaler(model, calibration, alpha=0.1)` wraps any fitted
+downscaler with split-conformal intervals (`lst_downscaled_lower`/`upper`,
+and `lst_downscaled_uncertainty` becomes the interval half-width) that have
+a finite-sample coverage guarantee on exchangeable held-out data. Calibrate
+on `blocked_calibration_split(...)` with the same split arguments: the
+spatially held-out blocks at training times, unseen by the model and
+earlier than the validation set. When the base model is a tree ensemble
+(Random Forest), intervals are *normalized* by the per-pixel spread across
+its trees (`ensemble_spread`), so they widen where the model is unsure;
+other models get constant-width intervals. `validate_downscaler` then
+reports `interval_coverage` and `interval_mean_width`. Calibration happens
+at the coarse scale; using the quantile for fine-resolution predictions
+assumes the error distribution transfers across scales, which the
+intervals record in their attributes rather than claim to verify.
+
 ## OpenAQ Surface Interpolation
 
 OpenAQ measurements are still preserved in `AnalysisResult.auxiliary['openaq']`
@@ -185,7 +212,13 @@ The package now exposes `fit_tsharp_downscaler` and
 TsHARP/DisTrad relation. `fit_xgboost_downscaler` and
 `fit_coarse_consistent_xgboost_downscaler` are available through the optional
 `ml` extra and preserve the same finite-support and coarse-consistency
-contracts as the existing Random Forest model. Use
+contracts as the existing Random Forest model. Both are
+thin wrappers over `fit_sklearn_downscaler`, which accepts any unfitted
+scikit-learn-compatible regressor (`fit`/`predict`) and returns a
+`SklearnDownscaler` with the same contracts. The models live in the
+`sentinel_analysis.downscale` package (`regression`, `gwr`, `consistency`,
+`spatiotemporal`); every public name is still importable from
+`sentinel_analysis.downscale` and `sentinel_analysis`. Use
 `blocked_spatiotemporal_split` or the compatibility wrapper
 `split_spatiotemporal`, and `validate_independent_reference` for external
 Landsat/ECOSTRESS comparisons.
@@ -256,11 +289,92 @@ are written to the selected output directory. A missing or low-quality
 Sentinel-5P overpass is reported and skipped; it must not be interpreted as a
 zero concentration field.
 
+## Benchmark Results (multi-city)
+
+`scripts/benchmark_multicity.py` (results in
+`output/multicity-benchmark/results_v2.json`) runs five preset cities in
+two periods (1-14 August and 1-14 April 2026), produced after the
+Sentinel-3 orientation, cloud-mask and quality-flag fixes (`roadmap.md`).
+
+**Setup.** Daytime Sentinel-3 passes only (local solar time 08-16 h);
+Sentinel-2 L2A from STAC COGs at 100 m; 1 km thermal grid. Holdout: the
+latest 30 % of acquisitions x a checkerboard of 5 x 5 km blocks
+(`blocked_spatiotemporal_split(block_size=5)`). Every model predicts at
+100 m; predictions are reaggregated to 1 km and scored on held-out cells
+only. Two predictor sets: Sentinel-2 indices (NDVI, NDBI, EVI, NDMI), and
+the same plus terrain (elevation, slope, `cos_incidence` at the Sentinel-3
+time). Reference ("no skill"): each scene's mean, i.e. a model that knows
+the day's temperature level but no spatial pattern.
+
+**Protocols.**
+
+- *Per scene* (pyDMS's intended use): for each validation scene, the
+  model is trained on that scene's non-held-out 1 km cells only.
+- *Pooled*: one model trained on all training scenes, then each scene's
+  prediction is offset by its mean error on that scene's non-held-out
+  cells ("scene-corrected"). Without that correction every model carries a
+  -1.5 to -4 K bias: no regression trained on other days can know today's
+  overall temperature level, which is why operational downscaling is
+  always anchored to the observed coarse scene.
+
+RMSE in K (indices / indices + terrain), per-scene protocol:
+
+| city, month | no skill | OLS | Random Forest | pyDMS local |
+|---|---|---|---|---|
+| Berlin 08 | 3.99 | 2.79 / 2.69 | 2.55 / 2.57 | 2.72 / **2.43** |
+| Berlin 04 | 4.59 | 3.59 / 3.21 | 3.20 / 3.19 | 3.59 / **2.74** |
+| Guadalajara 04 | 5.42 | 3.72 / 3.07 | 3.30 / 2.84 | 3.51 / **2.66** |
+| Mexico City 08 | 4.80 | 4.09 / 3.19 | 3.41 / 3.08 | 3.15 / **2.95** |
+| Mexico City 04 | 4.78 | 4.38 / 2.84 | 4.02 / **2.47** | 3.36 / 2.51 |
+| Lagos 04 | 4.07 | 3.78 / 3.50 | 3.51 / 3.20 | **2.27** / 2.31 |
+| Nairobi 08 | 4.07 | 2.94 / 2.83 | 2.78 / **2.58** | 2.73 / 2.60 |
+| Nairobi 04 | 4.98 | 4.68 / 4.30 | 4.48 / **3.89** | 4.60 / 3.85 |
+| **mean** | **4.59** | 3.75 / 3.20 | 3.40 / 2.98 | 3.24 / **2.76** |
+
+Guadalajara and Lagos in August had too few clear daytime observations
+(rainy season) to form a holdout.
+
+**Findings.**
+
+- Every model has real spatial skill over the no-skill reference.
+- Terrain predictors help most where there is relief: mean Random Forest
+  error falls from 3.40 to 2.98 K and pyDMS's from 3.24 to 2.76 K; Mexico
+  City in April drops from 4.02 to 2.47 K (Random Forest). Flat Berlin
+  barely changes, as expected.
+- pyDMS local (moving-window DMS, as in Sen-ET) trained per scene with
+  terrain is the most accurate overall (~40 % below the reference);
+  Random Forest with terrain is close and more uniform. TsHARP/OLS trail.
+- Trained once on many days (pooled), pyDMS can degenerate to an almost
+  constant field (Berlin August: spatial standard deviation of its
+  prediction ~0.1-0.2 K): it is designed to be trained on the scene it
+  sharpens.
+- Per-scene training also works where pooled training cannot: Lagos in
+  April left the pooled models only 3 complete training samples, but
+  per scene pyDMS reached 2.27 K.
+- Conformal 90 % intervals are **not** yet calibrated on real data
+  (empirical coverage 0.42-0.93, mostly below 0.90): they are calibrated
+  on raw coarse residuals, which include each day's level shift, so the
+  calibration days are not exchangeable with the validation days. Next
+  step: calibrate on scene-corrected residuals.
+
+**Recommendation.** Use terrain predictors; downscale per scene and anchor
+to the observed coarse LST (`fit_coarse_consistent_random_forest_downscaler`
+or pyDMS with its residual correction). Do not add model complexity before
+the uncertainty calibration above is fixed.
+
 ## Benchmark Results
+
+> **These Berlin results (Runs 1-3 and the STARFM real-reference check) are
+> invalid.** They were produced before two Sentinel-3 fixes: the default
+> area gridding flipped every LST scene north-south, and the reader's cloud
+> mask let most clouds through (see `roadmap.md`). The models were trained
+> on upside-down, cloud-contaminated targets, which is consistent with the
+> near-zero correlations reported below. They are kept only as a record;
+> see "Benchmark Results (multi-city)" for numbers produced after the fixes.
 
 `scripts/benchmark_downscalers.py` fetches one real, live Sentinel-3 LST +
 Sentinel-2 predictor cube over Berlin and evaluates every baseline in
-`downscale.py` on a `blocked_spatiotemporal_split` holdout (spatial +
+`downscale/` on a `blocked_spatiotemporal_split` holdout (spatial +
 temporal, not a random pixel split - see "Validation Protocol" above) via
 `validate_downscaler`. Run it with:
 

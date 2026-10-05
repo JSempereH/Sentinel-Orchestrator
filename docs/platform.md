@@ -87,6 +87,9 @@ This is self-hosted, single-trusted-user tooling, so "production" here means
   `<WORKER_OUTPUT_DIR>/jobs.db` (SQLite); a restart marks any job still
   `PENDING`/`RUNNING` as `FAILED` with an explanatory message instead of
   losing it.
+- **Worker concurrency**: at most `MAX_CONCURRENT_JOBS` (default 1) jobs
+  run at once; the rest wait as `PENDING`. A single Sentinel-1 SNAP job
+  peaked at ~11 GB of RAM, so raise this only on a machine sized for it.
 - **Worker `/usage`**: `sentinel_analysis`'s own providers (CDSE, CDS/ADS,
   OpenAQ) have no numeric credit balance the way a paid processing service
   might; `GET /usage` reports what each actually exposes (OpenAQ's real
