@@ -5,9 +5,9 @@ from .cache import AssetCache
 from .atmosphere import ColumnToSurfaceConfig, column_to_surface_estimate
 from .cities import CitySpec, get_city, list_cities
 from .config import AOI, ClientConfig
-from .cube import AnalysisGrid, CubeValidationError, GridSpec, tag_cube, validate_cube, validate_observation_set
-from .downscale import (CoarseConsistentDownscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
-                        XGBoostDownscaler, fit_coarse_consistent_gwr_downscaler,
+from .cube import AnalysisGrid, CubeValidationError, GridSpec, projected_bounds, tag_cube, utm_crs, validate_cube, validate_observation_set
+from .downscale import (CoarseConsistentDownscaler, ConformalDownscaler, ensemble_spread, fit_conformal_downscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
+                        SklearnDownscaler, XGBoostDownscaler, fit_sklearn_downscaler, fit_coarse_consistent_gwr_downscaler,
                         fit_coarse_consistent_linear_downscaler, fit_coarse_consistent_random_forest_downscaler,
                         fit_coarse_consistent_tsharp_downscaler, fit_coarse_consistent_xgboost_downscaler,
                         fit_gwr_downscaler, fit_linear_downscaler, fit_random_forest_downscaler,
@@ -24,6 +24,7 @@ from .sensors.sentinel1 import (
     Sentinel1ProcessingResult,
     Sentinel1ReadConfig,
     Sentinel1RTCConfig,
+    Sentinel1RTCSTACCatalog,
     build_s1_graph,
     process_s1_grd,
     process_s1,
@@ -32,14 +33,30 @@ from .sensors.sentinel1 import (
     read_s1_ard,
     read_s1_grd,
     read_s1_rtc,
+    read_s1_rtc_cog,
     sentinel1_indices,
 )
+from .sensors.cog import read_cog_to_grid
 from .sensors.ecostress import EcostressCatalog, read_ecostress_lst
 from .sensors.landsat import LandsatCatalog, read_landsat_lst
-from .sensors.sentinel2 import Sentinel2Catalog, Sentinel2ReadConfig, compose_s2, read_s2_l2a, scl_valid_mask, sentinel2_coverage, sentinel2_indices
+from .sensors.sentinel2 import (
+    SENTINEL2_L1C_PRODUCT_TYPE,
+    Sentinel2Catalog,
+    Sentinel2L1CReadConfig,
+    Sentinel2ReadConfig,
+    Sentinel2STACCatalog,
+    compose_s2,
+    read_s2_l1c,
+    read_s2_l2a,
+    read_s2_l2a_cog,
+    scl_valid_mask,
+    sentinel2_coverage,
+    sentinel2_indices,
+)
 from .sensors.sentinel5p import Sentinel5PCatalog, Sentinel5PReadConfig, grid_s5p, read_s5p_l2
 from .sensors.sentinel3 import (
     CDSECatalog,
+    LSTConfidenceFlag,
     LSTExceptionFlag,
     ProductFormatError,
     ProductQuery,
@@ -62,10 +79,23 @@ from .stac import STACCatalog, STACItem
 from .metadata import apply_variable_contract, ensure_compatible_units, validate_variable_contract
 from .reference import collocate_stations
 from .providers import AUXILIARY_PROVIDERS, AuxiliaryArtifact, AuxiliarySpec, CAMSConfig, CAMSProvider, ERA5Config, ERA5Provider, OpenAQConfig, OpenAQInterpolationConfig, OpenAQProvider
-from .validation import blocked_spatiotemporal_split, compare_to_reference, validate_independent_reference
-from .workflow import AnalysisRequest, AnalysisResult, AnalysisWorkflow
+from .validation import blocked_calibration_split, blocked_spatiotemporal_split, compare_to_reference, validate_independent_reference
+from .workflow import AnalysisRequest, AnalysisResult, AnalysisWorkflow, TemporalPair, select_temporal_pair
 
 __all__ = [
+    "ConformalDownscaler",
+    "ensemble_spread",
+    "fit_conformal_downscaler",
+    "blocked_calibration_split",
+    "SklearnDownscaler",
+    "fit_sklearn_downscaler",
+    "Sentinel1RTCSTACCatalog",
+    "read_s1_rtc_cog",
+    "Sentinel2STACCatalog",
+    "read_s2_l2a_cog",
+    "read_cog_to_grid",
+    "projected_bounds",
+    "utm_crs",
     "AOI",
     "AssetCache",
     "ColumnToSurfaceConfig",
@@ -86,6 +116,7 @@ __all__ = [
     "ClientConfig",
     "CubeValidationError",
     "GridSpec",
+    "LSTConfidenceFlag",
     "LSTExceptionFlag",
     "LinearDownscaler",
     "ProductFormatError",
@@ -110,6 +141,8 @@ __all__ = [
     "Sentinel1RTCConfig",
     "Sentinel2Catalog",
     "Sentinel2ReadConfig",
+    "Sentinel2L1CReadConfig",
+    "SENTINEL2_L1C_PRODUCT_TYPE",
     "Sentinel5PCatalog",
     "Sentinel5PReadConfig",
     "Sentinel3LST",
@@ -119,6 +152,8 @@ __all__ = [
     "STACItem",
     "TemporalMatch",
     "TemporalPolicy",
+    "TemporalPair",
+    "select_temporal_pair",
     "align_features",
     "apply_variable_contract",
     "apply_quality_mask",
@@ -165,6 +200,7 @@ __all__ = [
     "read_s1_ard",
     "read_s1_rtc",
     "read_s2_l2a",
+    "read_s2_l1c",
     "read_s5p_l2",
     "reaggregate_to_target",
     "scl_valid_mask",

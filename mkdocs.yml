@@ -1,0 +1,35 @@
+site_name: Sentinel Analysis
+site_description: Reproducible multisensor Sentinel analysis over areas of interest
+site_url: https://example.invalid/sentinel-analysis
+repo_name: sentinel-analysis
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+
+nav:
+  - Home: index.md
+  - Setup and credentials: setup.md
+  - E2E smoke test: e2e.md
+  - Architecture: architecture.md
+  - Platform: platform.md
+  - Workflows: workflows.md
+  - Guides: guides.md
+  - Validation: validation.md
+  - Downscaling and fusion: downscaling.md
+  - Production roadmap: roadmap.md

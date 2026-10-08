@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 import xarray as xr
 
@@ -19,6 +19,16 @@ AUXILIARY_PROVIDERS = ("era5", "cams", "openaq")
 
 class AuxiliaryProviderError(RuntimeError):
     """Raised when an auxiliary provider cannot fulfil a request."""
+
+
+class AuxiliaryProvider(Protocol):
+    """Download/normalize contract shared by ERA5, CAMS and OpenAQ."""
+
+    name: str
+
+    def download(self, aoi: Any, start: str, end: str, spec: "AuxiliarySpec", output_dir: str | Path) -> "AuxiliaryArtifact": ...
+
+    def open(self, path: str | Path, *, dataset: str) -> xr.Dataset: ...
 
 
 @dataclass(frozen=True)
@@ -149,8 +159,7 @@ def artifact_from_path(
 
     path = Path(path)
     key = request_key(provider, dataset, request)
-    checksum = cache.checksum(path)
-    cache.record(key, path, metadata={"provider": provider, "dataset": dataset, "request": dict(request)})
+    checksum = cache.record(key, path, metadata={"provider": provider, "dataset": dataset, "request": dict(request)})
     artifact = AuxiliaryArtifact(provider, dataset, path, checksum, manifest_path, dict(request))
     _write_manifest(manifest_path, artifact)
     return artifact

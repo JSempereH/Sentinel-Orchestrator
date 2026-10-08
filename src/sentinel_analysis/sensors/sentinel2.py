@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any
+from xml.etree import ElementTree
 import zipfile
 
 import numpy as np
@@ -20,14 +21,24 @@ import xarray as xr
 
 from ..catalog import ProductRef, _product_ref
 from ..config import AOI, ClientConfig
+from ..cube import AnalysisGrid
 from ..http import http_session
 from ..metadata import apply_variable_contract
 
 
 SENTINEL2_COLLECTION = "SENTINEL-2"
 SENTINEL2_PRODUCT_TYPE = "S2MSI2A"
+SENTINEL2_L1C_PRODUCT_TYPE = "S2MSI1C"
 S2_BANDS_10M = ("B02", "B03", "B04", "B08")
 S2_BANDS_20M = ("B05", "B06", "B07", "B8A", "B11", "B12")
+S2_BANDS_60M = ("B01", "B09", "B10")
+# The 10 TOA bands used for methane point-source detection in Varon et al.
+# 2024 (Nat. Commun. s41467-024-47754-y): B01/B09 (unused for the L2A
+# downscaling predictors above) plus everything except B06/B07/B10.
+S2_L1C_METHANE_BANDS = ("B01", "B02", "B03", "B04", "B05", "B08", "B8A", "B09", "B11", "B12")
+# ESA's metadata band order (band_id 0..12), used to resolve
+# RADIO_ADD_OFFSET/BOA_ADD_OFFSET's band_id attribute to a band name.
+_S2_BAND_ORDER = ("B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B10", "B11", "B12")
 S2_SCL_CLASSES = {
     0: "no_data",
     1: "saturated_or_defective",
@@ -54,6 +65,22 @@ class Sentinel2ReadConfig:
     observation_time: str | np.datetime64 | None = None
 
 
+@dataclass(frozen=True)
+class Sentinel2L1CReadConfig:
+    """Options for reading a Sentinel-2 L1C (top-of-atmosphere) granule.
+
+    L1C ships no SCL scene classification (that is an L2A/Sen2Cor product),
+    so cloud screening for L1C relies on the product-level ``cloudCover``
+    catalogue attribute (``Sentinel2Catalog.search(cloud_cover_max=...)``)
+    rather than a per-pixel mask.
+    """
+
+    bands: tuple[str, ...] = S2_L1C_METHANE_BANDS
+    target_resolution_m: int = 20
+    scale_reflectance: bool = True
+    observation_time: str | np.datetime64 | None = None
+
+
 def _require_rasterio():
     try:
         import rasterio
@@ -65,13 +92,13 @@ def _require_rasterio():
     return rasterio, Resampling, from_origin, reproject
 
 
-def _safe_root(path: str | Path, extract_dir: str | Path | None = None) -> Path:
+def _safe_root(path: str | Path, extract_dir: str | Path | None = None, *, manifest_name: str = "MTD_MSIL2A.xml") -> Path:
     path = Path(path)
     if path.is_dir():
         return path
     if path.suffix.lower() not in {".zip", ".safe"}:
         raise FileNotFoundError(f"Expected a Sentinel-2 SAFE directory or ZIP archive: {path}")
-    destination = Path(extract_dir) if extract_dir else Path(tempfile.mkdtemp(prefix="sentinel2-l2a-"))
+    destination = Path(extract_dir) if extract_dir else Path(tempfile.mkdtemp(prefix="sentinel2-safe-"))
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
     with zipfile.ZipFile(path) as archive:
@@ -83,7 +110,7 @@ def _safe_root(path: str | Path, extract_dir: str | Path | None = None) -> Path:
     safe_dirs = list(destination.glob("*.SAFE"))
     if len(safe_dirs) == 1:
         return safe_dirs[0]
-    manifests = list(destination.rglob("MTD_MSIL2A.xml"))
+    manifests = list(destination.rglob(manifest_name))
     if len(manifests) == 1:
         return manifests[0].parent
     raise ValueError(f"Could not identify one Sentinel-2 SAFE product under {destination}")
@@ -101,11 +128,53 @@ def _band_file(root: Path, band: str, resolution: int) -> Path:
     return candidates[0]
 
 
+def _band_file_l1c(root: Path, band: str) -> Path:
+    """Locate one L1C band file.
+
+    Unlike L2A (which ships each band resampled into R10m/R20m/R60m
+    triplicates), L1C ships exactly one native-resolution copy per band
+    with no resolution suffix in the filename (e.g. ``..._B01.jp2``).
+    """
+
+    candidates = sorted(p for p in root.rglob(f"*_{band}.jp2") if "TCI" not in p.name)
+    if not candidates:
+        raise FileNotFoundError(f"Could not find Sentinel-2 L1C band {band} under {root}")
+    return candidates[0]
+
+
 def _target_grid(source, resolution: int, from_origin, bounds=None):
     bounds = bounds or source.bounds
     width = max(1, int(round((bounds.right - bounds.left) / resolution)))
     height = max(1, int(round((bounds.top - bounds.bottom) / resolution)))
     return from_origin(bounds.left, bounds.top, resolution, resolution), width, height
+
+
+def _read_radiometric_offsets(manifest_path: Path, tag: str) -> dict[str, int]:
+    """Read per-band ``RADIO_ADD_OFFSET``/``BOA_ADD_OFFSET`` values.
+
+    ESA's processing baseline 04.00 (2022-01-25 onward) started shifting raw
+    digital numbers by a per-band offset (typically -1000) before the
+    ``QUANTIFICATION_VALUE`` division, so reflectance is
+    ``(DN + offset) / 10000``, not ``DN / 10000``. Products from before that
+    baseline carry no such element at all, so an empty dict (offset 0
+    everywhere) reproduces the old, still-correct-for-them behaviour.
+    Namespace-agnostic (`tag.rsplit('}', 1)`) because Sentinel-2 metadata's
+    default namespace is inherited by unprefixed child elements too.
+    """
+
+    if not manifest_path.exists():
+        return {}
+    offsets: dict[str, int] = {}
+    for element in ElementTree.parse(manifest_path).iter():
+        if element.tag.rsplit("}", 1)[-1] != tag or element.text is None:
+            continue
+        band_id = element.attrib.get("band_id")
+        if band_id is None or not band_id.isdigit():
+            continue
+        index = int(band_id)
+        if 0 <= index < len(_S2_BAND_ORDER):
+            offsets[_S2_BAND_ORDER[index]] = int(element.text)
+    return offsets
 
 
 def _observation_time(root: Path, configured: str | np.datetime64 | None) -> np.datetime64:
@@ -152,6 +221,13 @@ def read_s2_l2a(
 ) -> xr.Dataset:
     """Read one Sentinel-2 L2A granule into a common xarray Dataset."""
 
+    if extract_dir is None and Path(path).suffix.lower() == ".zip":
+        # Extract into a directory that is removed again: the bands are read
+        # eagerly below, so nothing needs the extraction afterwards (an
+        # earlier version leaked one ~1 GB SAFE extraction per call).
+        with tempfile.TemporaryDirectory(prefix="sentinel2-safe-") as temporary:
+            return read_s2_l2a(path, config=config, extract_dir=temporary, aoi=aoi)
+
     rasterio, Resampling, from_origin, reproject = _require_rasterio()
     config = config or Sentinel2ReadConfig()
     root = _safe_root(path, extract_dir)
@@ -178,6 +254,7 @@ def read_s2_l2a(
         target_transform, width, height = _target_grid(source, config.target_resolution_m, from_origin, clip_bounds)
         crs = source.crs
 
+    offsets = _read_radiometric_offsets(root / "MTD_MSIL2A.xml", "BOA_ADD_OFFSET") if config.scale_reflectance else {}
     variables: dict[str, tuple[tuple[str, str], np.ndarray]] = {}
     for band in config.bands:
         source_path = _band_file(root, band, config.target_resolution_m)
@@ -194,7 +271,7 @@ def read_s2_l2a(
         if str(band_crs) != str(crs):
             raise ValueError(f"Band {band} uses CRS {band_crs}, expected {crs}")
         if band != "SCL" and config.scale_reflectance:
-            array = array / 10000.0
+            array = (array + offsets.get(band, 0)) / 10000.0
         variables[band] = (("y", "x"), array)
 
     x = target_transform.c + (np.arange(width) + 0.5) * target_transform.a
@@ -214,6 +291,90 @@ def read_s2_l2a(
         dataset["SCL"].attrs.update({"flag_values": list(S2_SCL_CLASSES), "flag_meanings": " ".join(S2_SCL_CLASSES.values())})
         dataset["valid_mask"] = scl_valid_mask(dataset["SCL"])
     return apply_variable_contract(dataset, sensor="Sentinel-2", product=SENTINEL2_PRODUCT_TYPE, source=str(root))
+
+
+def read_s2_l1c(
+    path: str | Path,
+    *,
+    config: Sentinel2L1CReadConfig | None = None,
+    extract_dir: str | Path | None = None,
+    aoi: AOI | None = None,
+) -> xr.Dataset:
+    """Read one Sentinel-2 L1C (top-of-atmosphere) granule into an xarray Dataset.
+
+    L1C is the product level methane point-source detection needs (Varon
+    et al. 2024, Nat. Commun. s41467-024-47754-y): L2A's atmospheric
+    correction assumes a methane-free atmosphere and would attenuate or
+    remove the SWIR absorption signature the detection relies on.
+    """
+
+    if extract_dir is None and Path(path).suffix.lower() == ".zip":
+        # Extract into a directory that is removed again: the bands are read
+        # eagerly below, so nothing needs the extraction afterwards (an
+        # earlier version leaked one ~1 GB SAFE extraction per call).
+        with tempfile.TemporaryDirectory(prefix="sentinel2-safe-") as temporary:
+            return read_s2_l1c(path, config=config, extract_dir=temporary, aoi=aoi)
+
+    rasterio, Resampling, from_origin, reproject = _require_rasterio()
+    config = config or Sentinel2L1CReadConfig()
+    root = _safe_root(path, extract_dir, manifest_name="MTD_MSIL1C.xml")
+    first_path = _band_file_l1c(root, config.bands[0])
+    with rasterio.open(first_path) as source:
+        clip_bounds = None
+        if aoi is not None:
+            from pyproj import Transformer
+
+            transformer = Transformer.from_crs("EPSG:4326", source.crs, always_xy=True)
+            xs, ys = transformer.transform(
+                [aoi.west, aoi.east, aoi.east, aoi.west],
+                [aoi.south, aoi.south, aoi.north, aoi.north],
+            )
+            requested = (min(xs), min(ys), max(xs), max(ys))
+            clip_bounds = type(source.bounds)(
+                max(source.bounds.left, requested[0]),
+                max(source.bounds.bottom, requested[1]),
+                min(source.bounds.right, requested[2]),
+                min(source.bounds.top, requested[3]),
+            )
+            if clip_bounds.left >= clip_bounds.right or clip_bounds.bottom >= clip_bounds.top:
+                raise ValueError(f"Sentinel-2 product does not overlap AOI: {aoi}")
+        target_transform, width, height = _target_grid(source, config.target_resolution_m, from_origin, clip_bounds)
+        crs = source.crs
+
+    offsets = _read_radiometric_offsets(root / "MTD_MSIL1C.xml", "RADIO_ADD_OFFSET") if config.scale_reflectance else {}
+    variables: dict[str, tuple[tuple[str, str], np.ndarray]] = {}
+    for band in config.bands:
+        source_path = _band_file_l1c(root, band)
+        array, band_crs = _read_band(
+            source_path,
+            target_transform,
+            width,
+            height,
+            reproject,
+            Resampling,
+            categorical=False,
+            clip_bounds=clip_bounds,
+        )
+        if str(band_crs) != str(crs):
+            raise ValueError(f"Band {band} uses CRS {band_crs}, expected {crs}")
+        if config.scale_reflectance:
+            array = (array + offsets.get(band, 0)) / 10000.0
+        variables[band] = (("y", "x"), array)
+
+    x = target_transform.c + (np.arange(width) + 0.5) * target_transform.a
+    y = target_transform.f + (np.arange(height) + 0.5) * target_transform.e
+    dataset = xr.Dataset(variables, coords={"x": x, "y": y}).expand_dims(
+        time=[_observation_time(root, config.observation_time)]
+    )
+    dataset.attrs.update({
+        "product_name": root.name,
+        "sensor": "Sentinel-2 MSI",
+        "product_type": SENTINEL2_L1C_PRODUCT_TYPE,
+        "crs": crs.to_string(),
+        "resolution_m": config.target_resolution_m,
+        "reflectance_scale": "1/10000" if config.scale_reflectance else "raw",
+    })
+    return apply_variable_contract(dataset, sensor="Sentinel-2", product=SENTINEL2_L1C_PRODUCT_TYPE, source=str(root))
 
 
 def scl_valid_mask(scl: xr.DataArray) -> xr.DataArray:
@@ -315,11 +476,26 @@ def compose_s2(
 
 
 class Sentinel2Catalog:
-    """Search Sentinel-2 L2A products through the CDSE OData catalogue."""
+    """Search Sentinel-2 products through the CDSE OData catalogue.
 
-    def __init__(self, config: ClientConfig | None = None, *, session: requests.Session | None = None):
+    Defaults to L2A (surface reflectance); pass
+    ``product_type=SENTINEL2_L1C_PRODUCT_TYPE`` to search top-of-atmosphere
+    products instead, e.g. for methane point-source detection with
+    ``read_s2_l1c``.
+    """
+
+    def __init__(
+        self,
+        config: ClientConfig | None = None,
+        *,
+        session: requests.Session | None = None,
+        product_type: str = SENTINEL2_PRODUCT_TYPE,
+    ):
+        if product_type not in {SENTINEL2_PRODUCT_TYPE, SENTINEL2_L1C_PRODUCT_TYPE}:
+            raise ValueError(f"Unsupported Sentinel-2 product_type: {product_type!r}")
         self.config = config
         self.session = session or http_session()
+        self.product_type = product_type
         self.catalog_url = config.catalog_url if config else "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
         self.download_url = config.download_url if config else "https://download.dataspace.copernicus.eu/odata/v1/Products"
 
@@ -332,7 +508,7 @@ class Sentinel2Catalog:
         cloud_cover_max: float | None = None,
         limit: int = 100,
     ) -> list:
-        """Return online Sentinel-2 L2A products intersecting an AOI."""
+        """Return online Sentinel-2 products intersecting an AOI."""
 
         def iso(value: str | date | datetime, *, end_of_day: bool = False) -> str:
             date_only = False
@@ -354,7 +530,7 @@ class Sentinel2Catalog:
         filters = [
             f"Collection/Name eq '{SENTINEL2_COLLECTION}'",
             "Attributes/OData.CSC.StringAttribute/any(att:att/Name eq "
-            f"'productType' and att/OData.CSC.StringAttribute/Value eq '{SENTINEL2_PRODUCT_TYPE}')",
+            f"'productType' and att/OData.CSC.StringAttribute/Value eq '{self.product_type}')",
             f"OData.CSC.Intersects(area=geography'SRID=4326;{aoi.as_wkt()}')",
             f"ContentDate/Start lt {end_iso}",
             f"ContentDate/End gt {start_iso}",
@@ -381,3 +557,144 @@ class Sentinel2Catalog:
             url = payload.get("@odata.nextLink")
             params = None
         return products
+
+
+SENTINEL2_STAC_ENDPOINT = "https://planetarycomputer.microsoft.com/api/stac/v1"
+SENTINEL2_STAC_COLLECTION = "sentinel-2-l2a"
+# Planetary Computer names L2A assets by band id, Earth Search by common name.
+_S2_ASSET_ALIASES = {
+    "B01": ("B01", "coastal"),
+    "B02": ("B02", "blue"),
+    "B03": ("B03", "green"),
+    "B04": ("B04", "red"),
+    "B05": ("B05", "rededge1"),
+    "B06": ("B06", "rededge2"),
+    "B07": ("B07", "rededge3"),
+    "B08": ("B08", "nir"),
+    "B8A": ("B8A", "nir08"),
+    "B09": ("B09", "nir09"),
+    "B11": ("B11", "swir16"),
+    "B12": ("B12", "swir22"),
+    "SCL": ("SCL", "scl"),
+}
+
+
+class Sentinel2STACCatalog:
+    """Search Sentinel-2 L2A cloud-optimized scenes through a STAC API.
+
+    The alternative to ``Sentinel2Catalog`` + a full SAFE download: assets are
+    read in place with ``read_s2_l2a_cog``, fetching only the blocks that
+    cover the analysis grid. Defaults to Planetary Computer; Earth Search
+    (``https://earth-search.aws.element84.com/v1``) uses the same collection id.
+    """
+
+    def __init__(self, *, endpoint: str = SENTINEL2_STAC_ENDPOINT, collection: str = SENTINEL2_STAC_COLLECTION, catalog: Any | None = None):
+        from ..stac import STACCatalog
+
+        self.collection = collection
+        self.catalog = catalog or STACCatalog(endpoint)
+
+    def search(
+        self,
+        aoi: AOI,
+        start: str | date | datetime,
+        end: str | date | datetime,
+        *,
+        cloud_cover_max: float | None = None,
+        limit: int = 100,
+    ) -> list[ProductRef]:
+        from .cog import stac_product_ref
+
+        start = start if isinstance(start, str) else start.isoformat()
+        end = end if isinstance(end, str) else end.isoformat()
+        aoi.as_extent()
+        query = {"eo:cloud_cover": {"lte": cloud_cover_max}} if cloud_cover_max is not None else None
+        items = self.catalog.search(
+            collections=[self.collection],
+            bbox=[aoi.west, aoi.south, aoi.east, aoi.north],
+            datetime_range=f"{start}/{end}",
+            query=query,
+            limit=limit,
+        )
+        return [stac_product_ref(item, product_type=SENTINEL2_PRODUCT_TYPE) for item in items]
+
+
+def _s2_asset(assets: dict[str, Any], band: str) -> dict[str, Any]:
+    for name in _S2_ASSET_ALIASES.get(band, (band,)):
+        if name in assets:
+            return assets[name]
+    raise KeyError(f"STAC item has no asset for Sentinel-2 band {band}")
+
+
+def _s2_cog_scale_offset(asset: dict[str, Any], properties: dict[str, Any]) -> tuple[float, float]:
+    """Reflectance = DN * scale + offset for one STAC asset.
+
+    Catalogues that publish ``raster:bands`` scale/offset (Earth Search) are
+    trusted as-is. Otherwise (Planetary Computer) the processing baseline
+    decides: from 04.00 onward DNs carry ESA's -1000 ``BOA_ADD_OFFSET`` (see
+    ``_read_radiometric_offsets``), earlier ones do not.
+    """
+
+    from .cog import asset_scale_offset
+
+    scale, offset, _ = asset_scale_offset(asset)
+    bands = asset.get("raster:bands") or []
+    if bands and "scale" in bands[0]:
+        return scale, offset
+    try:
+        baseline = float(properties.get("s2:processing_baseline", "0"))
+    except (TypeError, ValueError):
+        baseline = 0.0
+    dn_offset = -1000.0 if baseline >= 4.0 else 0.0
+    return 1 / 10000.0, dn_offset / 10000.0
+
+
+def read_s2_l2a_cog(
+    product: ProductRef,
+    grid: AnalysisGrid,
+    *,
+    bands: tuple[str, ...] = Sentinel2ReadConfig().bands,
+) -> xr.Dataset:
+    """Read one STAC Sentinel-2 L2A scene directly onto ``grid``.
+
+    Reflectance bands are area-averaged onto the grid and SCL is
+    nearest-sampled, matching what the SAFE path produces after
+    ``AnalysisWorkflow._to_grid``. Not yet validated against a real live
+    scene - see docs/roadmap.md.
+    """
+
+    from .cog import asset_scale_offset, observation_time, read_cog_to_grid, sign_href
+
+    assets = product.metadata.get("assets", {})
+    properties = product.metadata.get("properties", {})
+    variables: dict[str, tuple[tuple[str, str], np.ndarray]] = {}
+    for band in bands:
+        asset = _s2_asset(assets, band)
+        _, _, nodata = asset_scale_offset(asset)
+        values = read_cog_to_grid(
+            sign_href(asset["href"]),
+            grid,
+            resampling="nearest" if band == "SCL" else "average",
+            nodata=0 if nodata is None else nodata,
+        )
+        if band != "SCL":
+            scale, offset = _s2_cog_scale_offset(asset, properties)
+            values = values * np.float32(scale) + np.float32(offset)
+        variables[band] = (("y", "x"), values)
+
+    dataset = xr.Dataset(variables, coords={"x": grid.x, "y": grid.y}).expand_dims(time=[observation_time(product)])
+    dataset.attrs.update({
+        "product_name": product.name,
+        "sensor": "Sentinel-2 MSI",
+        "product_type": SENTINEL2_PRODUCT_TYPE,
+        "crs": grid.crs,
+        "grid_id": grid.grid_id,
+        "resolution_m": grid.resolution_m,
+        "reflectance_scale": "1/10000",
+        "acquisition": "stac_cog",
+    })
+    if "SCL" in dataset:
+        dataset["SCL"].attrs.update({"flag_values": list(S2_SCL_CLASSES), "flag_meanings": " ".join(S2_SCL_CLASSES.values())})
+        # NaN SCL (outside the scene footprint) is not a "clear" class.
+        dataset["valid_mask"] = scl_valid_mask(dataset["SCL"]) & np.isfinite(dataset["SCL"])
+    return apply_variable_contract(dataset, sensor="Sentinel-2", product=SENTINEL2_PRODUCT_TYPE, source=product.product_id)

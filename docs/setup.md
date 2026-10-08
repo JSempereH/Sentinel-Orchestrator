@@ -6,13 +6,18 @@
 uv sync --extra dev --extra auxiliary --extra optical
 ```
 
-For Sentinel-1 processing, pick one of three `sentinel1_backend` values:
+For Sentinel-1 processing, pick one of four `sentinel1_backend` values:
 
 ```bash
-uv sync --extra sar    # "snap" (the default) - needs SNAP's `gpt` on PATH
-uv sync --extra hyp3   # "hyp3_rtc" - no SNAP/native deps, needs Earthdata credentials below
-uv sync --extra s1ard  # "s1ard" - confirmed broken, see docs/roadmap.md; kept in case upstream fixes it
+uv sync --extra sar                      # "snap" (the default) - needs SNAP's `gpt` on PATH
+uv sync --extra hyp3                     # "hyp3_rtc" - no SNAP/native deps, needs Earthdata credentials below
+uv sync --extra optical --extra landsat  # "pc_rtc" - Planetary Computer RTC COGs, no credentials, not yet validated on real scenes
+uv sync --extra s1ard                    # "s1ard" - confirmed broken, see docs/roadmap.md; kept in case upstream fixes it
 ```
+
+Other optional extras: `cloud` (Zarr output, needed by `sentinel-analysis
+run` and `AnalysisResult.save`) and `odc` (`AnalysisGrid.to_geobox()`/
+`from_geobox()` interop with odc-geo/odc-stac).
 
 `"snap"` (`process_s1_grd`) is the default and only needs SNAP's `gpt`
 executable on `PATH` - it builds its own GPT XML graph and never touches

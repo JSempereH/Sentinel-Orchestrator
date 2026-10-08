@@ -19,6 +19,7 @@ from sentinel_analysis import (
     read_l2_lst,
     read_s1_ard,
     read_s1_grd,
+    read_s2_l1c,
     read_s2_l2a,
     read_s5p_l2,
     sentinel1_indices,
@@ -56,6 +57,15 @@ def test_real_sentinel1_ard():
 
 def test_real_sentinel2_l2a():
     sentinel2_indices(read_s2_l2a(_product("SENTINEL2_SAFE_PATH")))
+
+
+def test_real_sentinel2_l1c():
+    """The methane-detection product level (Nat. Commun.
+    s41467-024-47754-y) - a distinct SAFE layout/manifest from L2A above
+    (no SCL, no R10m/R20m/R60m resolution triplicates)."""
+
+    dataset = read_s2_l1c(_product("SENTINEL2_L1C_SAFE_PATH"))
+    assert dataset.attrs["product_type"] == "S2MSI1C"
 
 
 def test_real_sentinel3_georeferencing():

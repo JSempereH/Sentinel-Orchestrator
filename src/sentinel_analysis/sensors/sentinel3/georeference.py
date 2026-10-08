@@ -175,7 +175,7 @@ def _grid_area_l2_lst(dataset: xr.Dataset, grid: AnalysisGrid) -> xr.Dataset:
     """Area-weighted aggregation using reconstructed geolocation footprints."""
 
     try:
-        from shapely.geometry import Polygon, box
+        import shapely
         from shapely.strtree import STRtree
     except ImportError as exc:
         raise RuntimeError("Install sentinel-analysis[geo] for Sentinel-3 footprint aggregation") from exc
@@ -196,69 +196,90 @@ def _grid_area_l2_lst(dataset: xr.Dataset, grid: AnalysisGrid) -> xr.Dataset:
     transformer = Transformer.from_crs("EPSG:4326", grid.crs, always_xy=True)
     px, py = transformer.transform(lon_values, lat_values)
     px, py = np.asarray(px), np.asarray(py)
-    corner_x, corner_y = _corner_grid(px), _corner_grid(py)
-    source_polygons: list[tuple[int, int, Polygon]] = []
-    for row in range(px.shape[0]):
-        for col in range(px.shape[1]):
-            corners = [
-                (corner_x[row, col], corner_y[row, col]),
-                (corner_x[row, col + 1], corner_y[row, col + 1]),
-                (corner_x[row + 1, col + 1], corner_y[row + 1, col + 1]),
-                (corner_x[row + 1, col], corner_y[row + 1, col]),
-            ]
-            polygon = Polygon(corners)
-            if polygon.is_valid and polygon.area > 0:
-                source_polygons.append((row, col, polygon))
-    target_polygons = [
-        box(grid.bounds[0] + col * grid.resolution[0], grid.bounds[1] + row * grid.resolution[1],
-            grid.bounds[0] + (col + 1) * grid.resolution[0], grid.bounds[1] + (row + 1) * grid.resolution[1])
-        for row in range(grid.height) for col in range(grid.width)
-    ]
-    tree = STRtree(target_polygons)
-    target_cell_area = grid.resolution[0] * grid.resolution[1]
+    left, bottom, right, top = grid.bounds
+    if px.size == 0:
+        # An AOI crop with no pixels (the catalogue footprint intersects the
+        # AOI but no swath pixel does): no footprints, an all-missing grid.
+        source_rows = source_cols = np.zeros(0, dtype=int)
+        polygons = np.array([], dtype=object)
+    else:
+        corner_x, corner_y = _corner_grid(px), _corner_grid(py)
+        # Corners of every source pixel, in ring order (shape: height, width, 4).
+        ring_x = np.stack([corner_x[:-1, :-1], corner_x[:-1, 1:], corner_x[1:, 1:], corner_x[1:, :-1]], axis=-1)
+        ring_y = np.stack([corner_y[:-1, :-1], corner_y[:-1, 1:], corner_y[1:, 1:], corner_y[1:, :-1]], axis=-1)
+        # Only pixels whose footprint can reach the grid: a full SLSTR swath
+        # is ~1.8 M pixels, a city grid touches a few thousand of them.
+        reaches = (
+            (ring_x.max(axis=-1) >= left) & (ring_x.min(axis=-1) <= right)
+            & (ring_y.max(axis=-1) >= bottom) & (ring_y.min(axis=-1) <= top)
+            & np.isfinite(ring_x).all(axis=-1) & np.isfinite(ring_y).all(axis=-1)
+        )
+        source_rows, source_cols = np.nonzero(reaches)
+        polygons = shapely.polygons(np.stack([ring_x[reaches], ring_y[reaches]], axis=-1))
+        usable = shapely.is_valid(polygons) & (shapely.area(polygons) > 0)
+        source_rows, source_cols, polygons = source_rows[usable], source_cols[usable], polygons[usable]
+
+    # Target cells in output order: row 0 is the *top* row, matching grid.y.
+    # (An earlier per-pixel version numbered rows from the bottom while
+    # labelling them with grid.y, flipping every area-gridded scene north-south.)
+    target_rows, target_cols = np.divmod(np.arange(grid.height * grid.width), grid.width)
+    resolution_x, resolution_y = grid.resolution
+    targets = shapely.box(
+        left + target_cols * resolution_x, top - (target_rows + 1) * resolution_y,
+        left + (target_cols + 1) * resolution_x, top - target_rows * resolution_y,
+    )
+    target_cell_area = resolution_x * resolution_y
+    source_index, target_index = STRtree(targets).query(polygons, predicate="intersects")
+    areas = shapely.area(shapely.intersection(polygons[source_index], targets[target_index]))
+    keep = areas > max(1e-8, target_cell_area * 1e-10)
+    source_index, target_index, weight = source_index[keep], target_index[keep], areas[keep] / target_cell_area
+    pair_source_row, pair_source_col = source_rows[source_index], source_cols[source_index]
+    pair_target_row, pair_target_col = target_rows[target_index], target_cols[target_index]
+    cell_shape = (grid.height, grid.width)
+
     continuous = {
         name: value for name, value in dataset.data_vars.items()
         if name not in {"latitude", "longitude", "valid_mask"} and {"y", "x"}.issubset(value.dims)
     }
     flag_names = {name for name in continuous if name.endswith("flags")}
-    output = {name: np.full((dataset.sizes["time"], grid.height, grid.width), np.nan, dtype=np.float32) for name in continuous if name not in flag_names}
+    n_times = dataset.sizes["time"]
+    footprint_cell = np.zeros(cell_shape, dtype=np.int32)
+    np.add.at(footprint_cell, (pair_target_row, pair_target_col), 1)
+    weight_cell = np.zeros(cell_shape, dtype=np.float64)
+    np.add.at(weight_cell, (pair_target_row, pair_target_col), weight)
+    coverage = np.broadcast_to(np.minimum(1.0, weight_cell).astype(np.float32), (n_times, *cell_shape)).copy()
+    footprint_count = np.broadcast_to(footprint_cell, (n_times, *cell_shape)).copy()
+    output: dict[str, np.ndarray] = {}
     # Flag variables such as cloud_flags are commonly float on disk (CF
     # conventions promote integer bitmasks to float to represent missing
     # values as NaN), which numpy's bitwise ufuncs reject outright - always
-    # accumulate as integers regardless of the source dtype (see below,
-    # values are cast to int right before the bitwise-or, after the
-    # isfinite check that already guarantees a real flag value).
-    flags = {name: np.zeros((dataset.sizes["time"], grid.height, grid.width), dtype=np.int64) for name in continuous if name in flag_names}
-    coverage = np.zeros((dataset.sizes["time"], grid.height, grid.width), dtype=np.float32)
-    valid_count = np.zeros_like(coverage, dtype=np.int32)
-    invalid_count = np.zeros_like(coverage, dtype=np.int32)
-    footprint_count = np.zeros_like(coverage, dtype=np.int32)
-    weights = {name: np.zeros_like(coverage, dtype=np.float64) for name in output}
-    sums = {name: np.zeros_like(coverage, dtype=np.float64) for name in output}
-    for source_row, source_col, polygon in source_polygons:
-        for target_index in tree.query(polygon, predicate="intersects"):
-            target_row, target_col = divmod(int(target_index), grid.width)
-            intersection_area = polygon.intersection(target_polygons[int(target_index)]).area
-            if intersection_area <= max(1e-8, target_cell_area * 1e-10):
+    # accumulate as integers, after the isfinite check that guarantees a
+    # real flag value.
+    flags: dict[str, np.ndarray] = {}
+    valid_count = np.zeros((n_times, *cell_shape), dtype=np.int32)
+    invalid_count = np.zeros((n_times, *cell_shape), dtype=np.int32)
+    for name, value in continuous.items():
+        # Read each variable once instead of once per footprint intersection.
+        values = value.transpose("time", "y", "x").values if "time" in value.dims else np.broadcast_to(value.values, (n_times, *value.shape))
+        if name in flag_names:
+            flags[name] = np.zeros((n_times, *cell_shape), dtype=np.int64)
+        else:
+            output[name] = np.full((n_times, *cell_shape), np.nan, dtype=np.float32)
+        for time_index in range(n_times):
+            pair_values = values[time_index][pair_source_row, pair_source_col].astype(np.float64)
+            finite = np.isfinite(pair_values)
+            rows, cols = pair_target_row[finite], pair_target_col[finite]
+            if name in flag_names:
+                np.bitwise_or.at(flags[name][time_index], (rows, cols), pair_values[finite].astype(np.int64))
                 continue
-            weight = intersection_area / target_cell_area
-            coverage[:, target_row, target_col] = np.minimum(1, coverage[:, target_row, target_col] + weight)
-            footprint_count[:, target_row, target_col] += 1
-            for time_index in range(dataset.sizes["time"]):
-                for name, value in continuous.items():
-                    cell_value = value.isel(time=time_index).values[source_row, source_col]
-                    if name in flag_names:
-                        if np.isfinite(cell_value):
-                            flags[name][time_index, target_row, target_col] |= int(cell_value)
-                    elif np.isfinite(cell_value):
-                        sums[name][time_index, target_row, target_col] += float(cell_value) * weight
-                        weights[name][time_index, target_row, target_col] += weight
-                        if name == "lst":
-                            valid_count[time_index, target_row, target_col] += 1
-                    elif name == "lst":
-                        invalid_count[time_index, target_row, target_col] += 1
-    for name in output:
-        np.divide(sums[name], weights[name], out=output[name], where=weights[name] > 0)
+            sums = np.zeros(cell_shape, dtype=np.float64)
+            weights = np.zeros(cell_shape, dtype=np.float64)
+            np.add.at(sums, (rows, cols), pair_values[finite] * weight[finite])
+            np.add.at(weights, (rows, cols), weight[finite])
+            np.divide(sums, weights, out=output[name][time_index], where=weights > 0)
+            if name == "lst":
+                np.add.at(valid_count[time_index], (rows, cols), 1)
+                np.add.at(invalid_count[time_index], (pair_target_row[~finite], pair_target_col[~finite]), 1)
     result = xr.Dataset(
         {name: (("time", "y", "x"), values) for name, values in output.items()},
         coords={"time": dataset.time, "y": grid.y, "x": grid.x},

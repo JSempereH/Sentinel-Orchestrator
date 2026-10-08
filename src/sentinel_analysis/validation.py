@@ -36,30 +36,55 @@ def compare_to_reference(
     }
 
 
+def _split_masks(
+    dataset: xr.Dataset,
+    *,
+    validation_fraction: float,
+    spatial_block_period: int,
+    block_size: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    validate_cube(dataset, require_time=True)
+    if not 0 < validation_fraction < 1:
+        raise ValueError("validation_fraction must be between 0 and 1")
+    if spatial_block_period < 2:
+        raise ValueError("spatial_block_period must be at least 2")
+    if block_size < 1:
+        raise ValueError("block_size must be at least 1")
+    if "time" in dataset.indexes and not dataset.indexes["time"].is_monotonic_increasing:
+        # The temporal holdout is "the latest times" by position; on an
+        # unsorted cube that silently becomes an arbitrary subset.
+        raise ValueError("blocked_spatiotemporal_split requires a chronologically sorted time index; call .sortby('time') first")
+    cutoff = max(1, int(np.floor(dataset.sizes["time"] * (1 - validation_fraction))))
+    time_train = np.arange(dataset.sizes["time"]) < cutoff
+    rows = np.arange(dataset.sizes["y"]) // block_size
+    cols = np.arange(dataset.sizes["x"]) // block_size
+    spatial_holdout = ((rows[:, None] + cols[None, :]) % spatial_block_period) == 0
+    return time_train, spatial_holdout
+
+
 def blocked_spatiotemporal_split(
     dataset: xr.Dataset,
     *,
     validation_fraction: float = 0.2,
     spatial_block_period: int = 5,
+    block_size: int = 1,
 ) -> tuple[xr.Dataset, xr.Dataset]:
     """Split a cube without mixing future times and spatial blocks.
 
     The validation set consists of spatially held-out cells from the latest
     time block.  This is deliberately deterministic so model comparisons are
     reproducible.
+
+    Held-out cells form a diagonal pattern of ``block_size`` x ``block_size``
+    pixel blocks. The default ``block_size=1`` holds out single pixels whose
+    direct neighbours are all in training, so spatial autocorrelation makes
+    the holdout optimistic; use a block several pixels wide (e.g. 5 km on a
+    1 km thermal grid) for a genuinely spatial test.
     """
 
-    validate_cube(dataset, require_time=True)
-    if not 0 < validation_fraction < 1:
-        raise ValueError("validation_fraction must be between 0 and 1")
-    if spatial_block_period < 2:
-        raise ValueError("spatial_block_period must be at least 2")
-    cutoff = max(1, int(np.floor(dataset.sizes["time"] * (1 - validation_fraction))))
-    time_train = np.arange(dataset.sizes["time"]) < cutoff
-    spatial_holdout = (
-        (np.arange(dataset.sizes["y"])[:, None] + np.arange(dataset.sizes["x"])[None, :])
-        % spatial_block_period
-    ) == 0
+    time_train, spatial_holdout = _split_masks(
+        dataset, validation_fraction=validation_fraction, spatial_block_period=spatial_block_period, block_size=block_size,
+    )
     train_mask = xr.DataArray(
         time_train[:, None, None] & ~spatial_holdout[None, :, :],
         dims=("time", "y", "x"),
@@ -69,6 +94,28 @@ def blocked_spatiotemporal_split(
         dims=("time", "y", "x"),
     )
     return dataset.where(train_mask), dataset.where(validation_mask)
+
+
+def blocked_calibration_split(
+    dataset: xr.Dataset,
+    *,
+    validation_fraction: float = 0.2,
+    spatial_block_period: int = 5,
+    block_size: int = 1,
+) -> xr.Dataset:
+    """Cells usable to calibrate prediction intervals for the same split.
+
+    These are the spatially held-out blocks at *training* times: excluded
+    from ``blocked_spatiotemporal_split``'s training set (so a model has not
+    seen them) and earlier than its validation set (so calibrating on them
+    does not touch validation data).
+    """
+
+    time_train, spatial_holdout = _split_masks(
+        dataset, validation_fraction=validation_fraction, spatial_block_period=spatial_block_period, block_size=block_size,
+    )
+    mask = xr.DataArray(time_train[:, None, None] & spatial_holdout[None, :, :], dims=("time", "y", "x"))
+    return dataset.where(mask)
 
 
 def validate_independent_reference(

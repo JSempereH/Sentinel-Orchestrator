@@ -1,12 +1,12 @@
 """Job store and background execution for analysis runs.
 
-Each submitted job runs in its own daemon thread. Jobs here are independent
-runs - possibly for different projects/AOIs entirely - so, unlike a queue
-that deliberately serializes calls to one rate-limited external API through
-a single worker thread, there is no reason to queue them behind one another.
-AnalysisWorkflow.execute()
-is a long, partly CPU-bound synchronous call, so it must run off the event
-loop regardless; a plain thread per job is the simplest way to do that.
+Each submitted job runs in its own daemon thread, since
+AnalysisWorkflow.execute() is a long, partly CPU-bound synchronous call that
+must run off the event loop. Jobs are independent, but they are not cheap:
+one Sentinel-1 SNAP run alone peaked at ~11 GB of RAM, and two concurrent
+live-data runs froze the host twice (see docs/roadmap.md). So at most
+MAX_CONCURRENT_JOBS jobs (default 1) execute at a time; the rest stay
+PENDING until a slot frees up.
 
 State is cached in memory for speed and mirrored to a small SQLite file
 (<WORKER_OUTPUT_DIR>/jobs.db) so job *history* survives a worker restart. A
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _jobs: dict[str, "JobState"] = {}
+_run_slots = threading.BoundedSemaphore(max(1, settings.max_concurrent_jobs))
 
 _RESTART_ERROR = "Worker process restarted while this job was in progress; it did not complete."
 
@@ -183,6 +184,11 @@ def _update(job_id: str, **fields: Any) -> None:
 
 
 def _run(job_id: str, request_dict: dict) -> None:
+    with _run_slots:
+        _execute(job_id, request_dict)
+
+
+def _execute(job_id: str, request_dict: dict) -> None:
     _update(job_id, status="RUNNING")
     try:
         result_dir = execute_and_persist(

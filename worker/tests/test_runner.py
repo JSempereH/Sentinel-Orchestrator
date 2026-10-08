@@ -7,8 +7,10 @@ no credentials - so it is checked directly against known reference values
 rather than mocked.
 """
 
-from app.runner import _projected_bounds, _utm_epsg, build_request
+from app.runner import build_request
 from sentinel_analysis.config import AOI
+from sentinel_analysis.cube import projected_bounds as _projected_bounds
+from sentinel_analysis.cube import utm_crs as _utm_epsg
 
 
 def test_utm_epsg_northern_hemisphere_berlin():

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -17,6 +17,38 @@ from ..providers import AUXILIARY_PROVIDERS, AuxiliarySpec
 
 
 SUPPORTED_SENSORS = ("sentinel1", "sentinel2", "sentinel3", "sentinel5p", "landsat", "ecostress")
+# "pc_rtc" reads Planetary Computer's pre-processed RTC COGs (no SNAP, no
+# HyP3); "stac_cog" reads Sentinel-2 L2A COGs in place instead of
+# downloading full SAFE archives. Both are opt-in until validated on real
+# scenes - see docs/roadmap.md.
+SENTINEL1_BACKENDS = ("snap", "hyp3_rtc", "pc_rtc", "s1ard")
+SENTINEL2_SOURCES = ("cdse_safe", "stac_cog")
+# "aoi_subset": after a product is read, keep only an AOI-cropped NetCDF of
+# the variables the analysis uses (re-used by later runs over the same AOI)
+# and delete the downloaded original. "keep": also keep the original.
+RAW_RETENTION = ("aoi_subset", "keep")
+
+
+def _as_instant(value: str | date | datetime, *, end_of_day: bool = False) -> datetime:
+    """Parse a request bound into a naive UTC datetime for chronological comparison.
+
+    A date-only bound (``date`` or ``"YYYY-MM-DD"``) used as an end covers the
+    whole day, matching how the catalogue searches interpret it.
+    """
+
+    if isinstance(value, datetime):
+        parsed, date_only = value, False
+    elif isinstance(value, date):
+        parsed, date_only = datetime.combine(value, datetime.min.time()), True
+    else:
+        text = str(value).strip()
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        date_only = "T" not in text and " " not in text
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    if end_of_day and date_only:
+        parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -40,6 +72,9 @@ class AnalysisRequest:
     s2_composite_method: str | None = None
     s2_min_observations: int = 1
     sentinel1_backend: str = "snap"
+    sentinel2_source: str = "cdse_safe"
+    raw_retention: str = "aoi_subset"
+    terrain_predictors: bool = False
     auxiliary: tuple[AuxiliarySpec, ...] = ()
 
     def __post_init__(self) -> None:
@@ -51,7 +86,7 @@ class AnalysisRequest:
             raise ValueError(f"Unsupported sensors: {unknown}")
         if self.target_sensor and self.target_sensor.lower() not in sensors:
             raise ValueError("target_sensor must be one of sensors")
-        if str(self.start) > str(self.end):
+        if _as_instant(self.start) > _as_instant(self.end, end_of_day=True):
             raise ValueError("Analysis start must not be after end")
         if self.s5p_resolution_deg <= 0:
             raise ValueError("s5p_resolution_deg must be positive")
@@ -63,8 +98,12 @@ class AnalysisRequest:
             raise ValueError("s2_composite_method must be None, 'mean' or 'median'")
         if self.s2_min_observations < 1:
             raise ValueError("s2_min_observations must be positive")
-        if self.sentinel1_backend not in {"s1ard", "snap", "hyp3_rtc"}:
-            raise ValueError("sentinel1_backend must be 's1ard', 'snap' or 'hyp3_rtc'")
+        if self.sentinel1_backend not in SENTINEL1_BACKENDS:
+            raise ValueError(f"sentinel1_backend must be one of {SENTINEL1_BACKENDS}")
+        if self.sentinel2_source not in SENTINEL2_SOURCES:
+            raise ValueError(f"sentinel2_source must be one of {SENTINEL2_SOURCES}")
+        if self.raw_retention not in RAW_RETENTION:
+            raise ValueError(f"raw_retention must be one of {RAW_RETENTION}")
         auxiliary = tuple(value if isinstance(value, AuxiliarySpec) else AuxiliarySpec.from_dict(value) for value in self.auxiliary)
         providers = [value.provider for value in auxiliary]
         if len(providers) != len(set(providers)):
@@ -145,6 +184,9 @@ class AnalysisRequest:
             "s2_composite_method": self.s2_composite_method,
             "s2_min_observations": self.s2_min_observations,
             "sentinel1_backend": self.sentinel1_backend,
+            "sentinel2_source": self.sentinel2_source,
+            "raw_retention": self.raw_retention,
+            "terrain_predictors": self.terrain_predictors,
             "auxiliary": [value.to_dict() for value in self.auxiliary],
         }
 
@@ -177,6 +219,9 @@ class AnalysisRequest:
             s2_composite_method=value.get("s2_composite_method"),
             s2_min_observations=value.get("s2_min_observations", 1),
             sentinel1_backend=value.get("sentinel1_backend", "snap"),
+            sentinel2_source=value.get("sentinel2_source", "cdse_safe"),
+            raw_retention=value.get("raw_retention", "aoi_subset"),
+            terrain_predictors=bool(value.get("terrain_predictors", False)),
             auxiliary=tuple(AuxiliarySpec.from_dict(item) for item in value.get("auxiliary", ())),
         )
 

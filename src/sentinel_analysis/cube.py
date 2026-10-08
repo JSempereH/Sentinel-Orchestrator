@@ -11,6 +11,7 @@ import xarray as xr
 from affine import Affine
 
 from .cities import CitySpec
+from .config import AOI
 
 
 class CubeValidationError(ValueError):
@@ -84,33 +85,123 @@ class AnalysisGrid:
     @classmethod
     def for_city(cls, city: CitySpec, *, resolution_m: int | None = None) -> "AnalysisGrid":
         resolution = resolution_m or city.target_resolution_m
-        try:
-            from pyproj import Transformer
-        except ImportError as exc:
-            raise RuntimeError("Install pyproj to build a projected analysis grid") from exc
-        transformer = Transformer.from_crs("EPSG:4326", city.crs, always_xy=True)
-        corners = [
-            transformer.transform(x, y)
-            for x, y in (
-                (city.aoi.west, city.aoi.south),
-                (city.aoi.west, city.aoi.north),
-                (city.aoi.east, city.aoi.south),
-                (city.aoi.east, city.aoi.north),
-            )
-        ]
-        projected_bounds = (
-            min(x for x, _ in corners),
-            min(y for _, y in corners),
-            max(x for x, _ in corners),
-            max(y for _, y in corners),
-        )
         return cls.from_bounds(
-            projected_bounds,
+            projected_bounds(city.aoi, city.crs),
             crs=city.crs,
             resolution_m=resolution,
             grid_id=f"{city.city_id}:{city.crs}:{resolution}m",
             city_id=city.city_id,
         )
+
+    @classmethod
+    def for_aoi(
+        cls,
+        aoi: AOI,
+        *,
+        resolution_m: int | float,
+        crs: str | None = None,
+        grid_id: str | None = None,
+    ) -> "AnalysisGrid":
+        """Snap a projected grid around any lon/lat AOI.
+
+        ``crs`` defaults to the UTM zone of the AOI centre, so arbitrary areas
+        get a metric grid without a preset ``CitySpec``.
+        """
+
+        crs = crs or utm_crs((aoi.west + aoi.east) / 2, (aoi.south + aoi.north) / 2)
+        return cls.from_bounds(projected_bounds(aoi, crs), crs=crs, resolution_m=resolution_m, grid_id=grid_id)
+
+    def to_geobox(self):
+        """Return the equivalent ``odc.geo.geobox.GeoBox`` (for odc-stac/odc-geo).
+
+        Requires the ``odc`` extra.
+        """
+
+        try:
+            from odc.geo.geobox import GeoBox
+        except ImportError as exc:
+            raise RuntimeError("Install sentinel-analysis[odc] to convert grids to odc-geo GeoBoxes") from exc
+        return GeoBox((self.height, self.width), self.transform, self.crs)
+
+    @classmethod
+    def from_geobox(cls, geobox, *, grid_id: str | None = None, city_id: str | None = None) -> "AnalysisGrid":
+        """Build a grid from a north-up ``odc.geo`` GeoBox with square pixels."""
+
+        transform = Affine(*tuple(geobox.affine)[:6])
+        if transform.b != 0 or transform.d != 0 or transform.e >= 0 or abs(transform.a) != abs(transform.e):
+            raise ValueError("Only north-up GeoBoxes with square pixels can become an AnalysisGrid")
+        height, width = geobox.shape
+        resolution = float(transform.a)
+        left, top = float(transform.c), float(transform.f)
+        bounds = (left, top - height * resolution, left + width * resolution, top)
+        crs = str(geobox.crs)
+        identifier = grid_id or f"{crs}:{resolution:g}m:{bounds[0]:g},{bounds[1]:g},{bounds[2]:g},{bounds[3]:g}"
+        return cls(identifier, crs, bounds, (resolution, resolution), int(width), int(height), transform, city_id)
+
+    def chips(self, chip_size_m: float, *, drop_partial: bool = True) -> list["AnalysisGrid"]:
+        """Partition this grid into fixed-size, non-overlapping sub-grids.
+
+        Unlike `from_bounds`, which snaps to an arbitrary AOI-shaped extent,
+        this produces uniform patches (e.g. the 2.5x2.5 km chips fixed-size
+        training/inference patches are built from). `chip_size_m` must be a
+        whole multiple of the grid resolution. By default a chip that would
+        be cut short by the parent grid's edge is dropped rather than
+        returned undersized; pass ``drop_partial=False`` to keep it.
+        """
+
+        if chip_size_m <= 0:
+            raise ValueError("chip_size_m must be positive")
+        resolution = self.resolution[0]
+        chip_pixels = chip_size_m / resolution
+        if abs(chip_pixels - round(chip_pixels)) > 1e-6:
+            raise ValueError(f"chip_size_m ({chip_size_m}) must be a whole multiple of the grid resolution ({resolution})")
+        chip_pixels = int(round(chip_pixels))
+        if chip_pixels < 1:
+            raise ValueError("chip_size_m must be at least one pixel wide")
+
+        left, _, _, top = self.bounds
+        n_cols = self.width // chip_pixels if drop_partial else ceil(self.width / chip_pixels)
+        n_rows = self.height // chip_pixels if drop_partial else ceil(self.height / chip_pixels)
+        result: list[AnalysisGrid] = []
+        for row in range(n_rows):
+            for col in range(n_cols):
+                chip_width = min(chip_pixels, self.width - col * chip_pixels)
+                chip_height = min(chip_pixels, self.height - row * chip_pixels)
+                chip_left = left + col * chip_pixels * resolution
+                chip_top = top - row * chip_pixels * resolution
+                chip_bounds = (chip_left, chip_top - chip_height * resolution, chip_left + chip_width * resolution, chip_top)
+                result.append(
+                    AnalysisGrid(
+                        grid_id=f"{self.grid_id}:chip:{row}:{col}",
+                        crs=self.crs,
+                        bounds=chip_bounds,
+                        resolution=self.resolution,
+                        width=chip_width,
+                        height=chip_height,
+                        transform=Affine(resolution, 0, chip_left, 0, -resolution, chip_top),
+                        city_id=self.city_id,
+                    )
+                )
+        return result
+
+
+def utm_crs(lon: float, lat: float) -> str:
+    """Standard UTM zone CRS for a WGS84 lon/lat (6-degree zones, N/S hemisphere)."""
+
+    zone = int((lon + 180) // 6) % 60 + 1
+    return f"EPSG:{(32600 if lat >= 0 else 32700) + zone}"
+
+
+def projected_bounds(aoi: AOI, crs: str) -> tuple[float, float, float, float]:
+    """Bounds of a lon/lat AOI in ``crs``, densifying edges so curved
+    projected edges (e.g. a UTM box's bowed north edge) are fully enclosed."""
+
+    try:
+        from pyproj import Transformer
+    except ImportError as exc:
+        raise RuntimeError("Install pyproj to build a projected analysis grid") from exc
+    transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    return transformer.transform_bounds(aoi.west, aoi.south, aoi.east, aoi.north, densify_pts=21)
 
 
 # Existing public name remains a readable alias while new code can use the

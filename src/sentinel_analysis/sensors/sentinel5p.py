@@ -124,7 +124,35 @@ class Sentinel5PCatalog:
             products = products[:limit]
             url = payload.get("@odata.nextLink")
             params = None
-        return products
+        return deduplicate_orbits(products)
+
+
+_S5P_ORBIT = re.compile(r"_\d{8}T\d{6}_\d{8}T\d{6}_(\d{5})_")
+_S5P_STREAM_PRIORITY = {"RPRO": 0, "OFFL": 1, "NRTI": 2}
+
+
+def deduplicate_orbits(products: list[ProductRef]) -> list[ProductRef]:
+    """Keep one product per orbit, preferring reprocessed, then offline,
+    then near-real-time processing.
+
+    CDSE returns both the NRTI granules and the OFFL orbit file of the same
+    overpass; using both duplicates every observation (and downloads the
+    same orbit twice).
+    """
+
+    best: dict[str, ProductRef] = {}
+    passthrough: list[ProductRef] = []
+    for product in products:
+        match = _S5P_ORBIT.search(product.name)
+        if not match:
+            passthrough.append(product)
+            continue
+        orbit = match.group(1)
+        stream = product.name[4:8]
+        current = best.get(orbit)
+        if current is None or _S5P_STREAM_PRIORITY.get(stream, 9) < _S5P_STREAM_PRIORITY.get(current.name[4:8], 9):
+            best[orbit] = product
+    return [*best.values(), *passthrough]
 
 
 def _open_product(path: str | Path, *, chunks: Mapping[str, int] | str | None = None) -> xr.Dataset:
@@ -156,12 +184,19 @@ def read_s5p_l2(
     path: str | Path,
     *,
     config: Sentinel5PReadConfig | None = None,
+    aoi: AOI | None = None,
+    aoi_margin_deg: float = 0.1,
 ) -> xr.Dataset:
     """Read a Sentinel-5P L2 gas product as a quality-filtered swath.
 
     The result intentionally keeps latitude/longitude and an observation
     dimension. It is not silently treated as a regular raster; call
     :func:`grid_s5p` when an analysis grid is required.
+
+    With ``aoi``, only observations within the AOI plus ``aoi_margin_deg``
+    are kept and loaded (an OFFL product covers a whole orbit, ~600 MB, of
+    which a city needs a few hundred pixels), and the observation index is
+    flattened so the result can be written to NetCDF.
     """
 
     config = config or Sentinel5PReadConfig()
@@ -184,6 +219,16 @@ def read_s5p_l2(
         "latitude": latitude.stack(observation=[dim for dim in latitude.dims if dim != "time"]),
         "longitude": longitude.stack(observation=[dim for dim in longitude.dims if dim != "time"]),
     })
+    if aoi is not None:
+        lat_values = np.asarray(result["latitude"].values).reshape(-1, result.sizes["observation"])[0]
+        lon_values = np.asarray(result["longitude"].values).reshape(-1, result.sizes["observation"])[0]
+        inside = (
+            (lat_values >= aoi.south - aoi_margin_deg) & (lat_values <= aoi.north + aoi_margin_deg)
+            & (lon_values >= aoi.west - aoi_margin_deg) & (lon_values <= aoi.east + aoi_margin_deg)
+        )
+        # deep copy so the crop owns its memory instead of viewing the whole orbit's arrays
+        result = result.isel(observation=np.flatnonzero(inside)).reset_index("observation", drop=True).load().copy(deep=True)
+        source.close()
     observation_time = _observation_time(Path(path), config.observation_time)
     if "time" not in result.dims:
         result = result.expand_dims(time=[observation_time])

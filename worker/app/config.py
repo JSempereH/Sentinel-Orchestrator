@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # AnalysisWorkflow.execute(max_workers=...)).
     max_download_workers: int = 4
 
+    # Max jobs executing at once; further submissions wait as PENDING. Each
+    # job can need several GB of RAM (SNAP, full-scene reads), so the safe
+    # default is strictly serial.
+    max_concurrent_jobs: int = 1
+
     class Config:
         env_file = ".env"
         # .env also carries CDSE/CDS/CAMS/OpenAQ credentials read directly by
