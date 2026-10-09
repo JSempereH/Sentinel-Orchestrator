@@ -118,7 +118,7 @@ npm run build   # writes dist/, which the worker serves at / automatically
 ## Running
 
 ```bash
-cd worker && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8100
+cd worker && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8100 --timeout-keep-alive 30
 # or from the repo root: make worker
 ```
 
@@ -150,12 +150,25 @@ Tests mock `app.jobs.execute_and_persist`, so they do not need
 
 ## Notes
 
-- Each submitted job runs in its own daemon thread; status is cached in
-  memory and mirrored to `<WORKER_OUTPUT_DIR>/jobs.db` (SQLite) so job
-  *history* survives a restart. The work itself cannot resume mid-run, so any
-  job still `PENDING`/`RUNNING` when the process starts is marked `FAILED`
-  with an explanatory `error_message` instead of silently disappearing
-  (previously a restart made the backend's polling loop see a 404).
+- Each job runs in its own child process (so it can be cancelled with
+  `POST /jobs/{id}/cancel`, is stopped after `JOB_TIMEOUT_HOURS`, and an
+  out-of-memory kill fails only that job) and logs to
+  `<WORKER_OUTPUT_DIR>/<job id>/job.log` (`GET /jobs/{id}/log`). Status is
+  mirrored to `<WORKER_OUTPUT_DIR>/jobs.db` (SQLite) so job *history*
+  survives a restart; a run cannot resume mid-way, so any job still
+  `PENDING`/`RUNNING` at startup is marked `FAILED` with an explanatory
+  `error_message`.
+- Finished jobs are deleted with their files after `JOB_RETENTION_DAYS`
+  (or at once with `DELETE /jobs/{id}`); a successful job keeps only
+  `result/` and `job.log`. `GET /health/ready` checks disk space and every
+  provider credential. Full operating guide: `docs/platform.md`,
+  "Production operation".
 - A bearer token is sufficient for a single trusted worker reached over a
   LAN, VPN, or SSH tunnel. If this worker is ever reachable over the open
   internet, put TLS in front of it (reverse proxy) first.
+- Oversized requests are rejected at submission with HTTP 422, before the
+  job is queued: `MAX_AOI_KM2` (default 10000), `MAX_PRODUCTS_PER_SENSOR`
+  (100) and `MAX_ESTIMATED_GB` (8, the estimated in-memory size of the
+  cubes; peak RAM is up to about twice that). Set any of them to 0 to
+  disable it. Products that fail to download or read are skipped and listed
+  under `failed_products` in the result's `provenance.json`.

@@ -16,7 +16,9 @@ from typing import Callable
 
 from sentinel_analysis.config import AOI, ClientConfig
 from sentinel_analysis.cube import AnalysisGrid
+from sentinel_analysis.downscale import DownscaleSpec
 from sentinel_analysis.providers import AuxiliarySpec
+from sentinel_analysis.workflow.limits import RequestLimits
 from sentinel_analysis.workflow.request import AnalysisRequest
 from sentinel_analysis.workflow.runner import AnalysisWorkflow
 
@@ -42,7 +44,7 @@ def build_request(request_dict: dict) -> AnalysisRequest:
         return AnalysisRequest.from_dict(request_dict)
 
     payload = dict(request_dict)
-    aoi = AOI(**payload["aoi"])
+    aoi = AOI.from_dict(payload["aoi"])
     resolution_m = float(payload.get("resolution_m", 100))
     thermal_resolution_m = float(payload.get("thermal_resolution_m", max(1000.0, resolution_m)))
 
@@ -69,6 +71,21 @@ def build_request(request_dict: dict) -> AnalysisRequest:
         raw_retention=payload.get("raw_retention", "aoi_subset"),
         terrain_predictors=bool(payload.get("terrain_predictors", False)),
         auxiliary=tuple(AuxiliarySpec.from_dict(item) for item in payload.get("auxiliary", ())),
+        thermal_overpass=payload.get("thermal_overpass", "any"),
+        min_aoi_coverage=payload.get("min_aoi_coverage", 0.3),
+        min_clear_fraction=payload.get("min_clear_fraction", 0.0),
+        on_product_error=payload.get("on_product_error", "skip"),
+        downscale=DownscaleSpec.from_dict(payload["downscale"]) if payload.get("downscale") else None,
+    )
+
+
+def request_limits() -> RequestLimits:
+    """The worker's configured request limits (0 disables one)."""
+
+    return RequestLimits(
+        max_aoi_km2=settings.max_aoi_km2 or None,
+        max_products_per_sensor=settings.max_products_per_sensor or None,
+        max_estimated_gb=settings.max_estimated_gb or None,
     )
 
 
@@ -90,6 +107,7 @@ def execute_and_persist(
         config=ClientConfig.from_env(),
         max_workers=settings.max_download_workers,
         progress=progress_cb,
+        limits=request_limits(),
     )
 
     return result.save(output_root / job_id / "result")

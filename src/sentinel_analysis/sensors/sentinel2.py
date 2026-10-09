@@ -659,8 +659,8 @@ def read_s2_l2a_cog(
 
     Reflectance bands are area-averaged onto the grid and SCL is
     nearest-sampled, matching what the SAFE path produces after
-    ``AnalysisWorkflow._to_grid``. Not yet validated against a real live
-    scene - see docs/roadmap.md.
+    ``AnalysisWorkflow._to_grid``. Validated against a real scene: the 10 m
+    bands match the SAFE bit for bit (see docs/history.md).
     """
 
     from .cog import asset_scale_offset, observation_time, read_cog_to_grid, sign_href

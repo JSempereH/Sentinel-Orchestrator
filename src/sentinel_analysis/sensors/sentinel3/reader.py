@@ -28,6 +28,13 @@ from .quality import cf_flag_mask_array
 # (acquisition times). Everything else in an SL_2_LST product - notably the
 # ~38 MB met_tx.nc of a ~70 MB archive - is never read.
 SLSTR_LST_FILES = ("LST_in.nc", "geodetic_in.nc", "flags_in.nc", "geometry_tn.nc", "xfdumanifest.xml")
+# The two files that tell how much of an AOI a product sees clear of cloud
+# (~10 MB of the ~18 MB above): fetched first when probing products.
+# Geolocation, cloud mask and view geometry (~14 MB): enough to tell how much
+# of the AOI a product would leave usable, before its LST is downloaded.
+SLSTR_PROBE_FILES = ("geodetic_in.nc", "flags_in.nc", "geometry_tn.nc")
+# Same cut as the default QualityPolicy.max_view_zenith.
+PROBE_MAX_VIEW_ZENITH = 45.0
 
 
 class ProductFormatError(ValueError):
@@ -394,3 +401,61 @@ def inspect_l2_lst(path: str | Path) -> dict[str, object]:
         finally:
             for _, dataset in opened:
                 dataset.close()
+
+
+def aoi_clear_fraction(root: str | Path, aoi, *, max_view_zenith: float | None = PROBE_MAX_VIEW_ZENITH) -> float | None:
+    """Share of a product's pixels inside ``aoi`` that would survive the
+    default quality screening: clear for ESA's Bayesian cloud mask
+    (``bayes_in`` ``single_moderate``, as the reader uses) and seen at no
+    more than ``max_view_zenith`` degrees.
+
+    Needs only ``SLSTR_PROBE_FILES``, so a product can be judged before its
+    LST is downloaded. Without ``geometry_tn.nc`` the view angle is not
+    checked. Returns ``None`` when no pixel falls inside the AOI. Falls back
+    to the ``cloud_in`` test subset when a product has no Bayesian mask.
+    """
+
+    root = Path(root)
+    with xr.open_dataset(root / "geodetic_in.nc") as geodetic, xr.open_dataset(root / "flags_in.nc") as flags:
+        if "bayes_in" in flags:
+            cloud = np.asarray(cf_flag_mask_array(flags["bayes_in"], meanings=("single_moderate",)).values)
+        else:
+            cloud = np.asarray(cf_flag_mask_array(flags["cloud_in"], meanings=("gross_cloud", "thin_cirrus", "medium_high", "fog", "stratus")).values)
+        unusable = cloud.astype(bool)
+        geometry_path = root / "geometry_tn.nc"
+        if max_view_zenith is not None and geometry_path.exists():
+            with xr.open_dataset(geometry_path) as geometry:
+                zenith = _sat_zenith_on_image_grid([(geometry_path, geometry), (root / "geodetic_in.nc", geodetic)], {"lst": geodetic["latitude_in"]})
+            if zenith is not None:
+                unusable |= ~(np.asarray(zenith.values) <= max_view_zenith)
+        return _clear_fraction(geodetic["latitude_in"].values, geodetic["longitude_in"].values, unusable, aoi)
+
+
+def subset_clear_fraction(path: str | Path, aoi, *, max_view_zenith: float | None = PROBE_MAX_VIEW_ZENITH) -> float | None:
+    """``aoi_clear_fraction`` of a stored AOI subset (same cloud test, same view-angle cut)."""
+
+    with xr.open_dataset(path) as subset:
+        if not {"latitude", "longitude", "cloud_mask"} <= set(subset.variables):
+            return None
+        unusable = np.asarray(subset["cloud_mask"].values).astype(bool)
+        if max_view_zenith is not None and "sat_zenith" in subset:
+            unusable |= ~(np.asarray(subset["sat_zenith"].values) <= max_view_zenith)
+        return _clear_fraction(subset["latitude"].values, subset["longitude"].values, unusable, aoi)
+
+
+def _clear_fraction(latitude, longitude, cloud, aoi) -> float | None:
+    """Clear share of the pixels inside ``aoi`` (its polygon when it has one); ``None`` if none is inside."""
+
+    latitude, longitude = np.asarray(latitude, dtype=float), np.asarray(longitude, dtype=float)
+    cloud = np.asarray(cloud).astype(bool)
+    inside = (
+        np.isfinite(latitude) & np.isfinite(longitude)
+        & (latitude >= aoi.south) & (latitude <= aoi.north) & (longitude >= aoi.west) & (longitude <= aoi.east)
+    )
+    if inside.any() and aoi.has_geometry:
+        import shapely
+
+        inside[inside] = shapely.contains_xy(aoi.shape(), longitude[inside], latitude[inside])
+    if not inside.any():
+        return None
+    return float(1.0 - cloud[inside].mean())

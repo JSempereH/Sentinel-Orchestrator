@@ -48,11 +48,16 @@ def align_features(
     # monotonic source index; acquisitions often arrive in catalogue
     # (cloud-cover) order rather than chronological order.
     features = features.sortby("time")
+    boolean = [name for name, variable in features.data_vars.items() if variable.dtype == bool]
     aligned = features.reindex(
         time=target.time,
         method="nearest",
         tolerance=str(policy.tolerance),
     )
+    # Unmatched times are NaN, which turns masks into float64 (8x the memory
+    # of bool, and NaN reads as True); no match means "not valid".
+    for name in boolean:
+        aligned[name] = aligned[name].fillna(False).astype(bool)
     source_times = features.time.values.astype("datetime64[ns]")
     target_times = target.time.values.astype("datetime64[ns]")
     positions = np.searchsorted(source_times, target_times)

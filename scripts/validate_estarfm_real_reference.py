@@ -86,7 +86,7 @@ def fetch_sentinel3_cube(city):
     # max_workers=1: this machine froze twice when two live-fetch scripts
     # each ran with max_workers=2 concurrently - keep processing serial as
     # a safety margin, and never run this alongside another heavy script
-    # (see _liveguard.acquire() above and docs/roadmap.md).
+    # (see _liveguard.acquire() above and docs/history.md).
     result = AnalysisWorkflow(request).execute(OUTPUT_DIR, config=ClientConfig.from_env(), max_workers=1)
     cube = result.cube.sortby("time")
     has_data = [t for t in range(cube.sizes["time"]) if np.isfinite(cube["lst"].isel(time=t).values).any()]

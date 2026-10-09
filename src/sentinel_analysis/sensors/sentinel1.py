@@ -728,6 +728,14 @@ def sentinel1_indices(dataset: xr.Dataset) -> xr.Dataset:
     result["VH_VV_ratio_dB"].attrs.update({"long_name": "VH to VV backscatter ratio", "units": "dB"})
     result["RVI"].attrs.update({"long_name": "dual-polarization radar vegetation index", "units": "1"})
     result["radar_span"].attrs.update({"long_name": f"VV plus VH {prefix}", "units": "linear"})
+    # Derived predictors inherit the source band's provenance: without it
+    # the fusion step's metadata contract rejected every Sentinel-1 cube.
+    source = dataset[f"{prefix}_VV"].attrs
+    for name in ("VH_VV_ratio_dB", "RVI", "radar_span"):
+        for key in ("sensor", "product", "aggregation_method", "variable_role", "footprint"):
+            if source.get(key):
+                result[name].attrs.setdefault(key, source[key])
+        result[name].attrs.setdefault("variable_role", "feature")
     return result
 
 
@@ -865,8 +873,9 @@ def read_s1_rtc_cog(
 
     Assets are linear-power gamma0 COGs named by lower-case polarization
     (``vv``/``vh``). Backscatter is area-averaged in linear power, which is
-    also the appropriate speckle-reducing aggregation. Not yet validated
-    against a real live scene - see docs/roadmap.md.
+    also the appropriate speckle-reducing aggregation. Validated against a
+    real scene (physically plausible medians per land cover, see
+    docs/history.md).
     """
 
     from .cog import asset_scale_offset, observation_time, read_cog_to_grid, sign_href

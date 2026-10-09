@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import dataclasses
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -332,7 +334,7 @@ def test_sentinel2_same_time_tiles_are_mosaicked():
     assert result[0]["valid_mask"].all().item()
 
 
-def test_predictor_cube_preserves_union_of_sensor_times():
+def test_each_predictor_sensor_keeps_its_own_times():
     request = AnalysisRequest.for_city(
         get_city("Berlin"),
         "2025-06-19",
@@ -340,7 +342,6 @@ def test_predictor_cube_preserves_union_of_sensor_times():
         sensors=("sentinel2", "sentinel5p"),
         resolution_m=100,
     )
-    workflow = AnalysisWorkflow(request)
     assert request.predictor_grid is not None
     grid = request.predictor_grid
     s2 = xr.Dataset(
@@ -354,11 +355,16 @@ def test_predictor_cube_preserves_union_of_sensor_times():
         attrs={"crs": grid.crs, "grid_id": grid.grid_id},
     )
 
-    result = workflow._merge_predictors({"sentinel2": s2, "sentinel5p": s5p})
+    request = dataclasses.replace(request, sensors=("sentinel3", "sentinel2", "sentinel5p"), predictor_grid=None, grid=None, thermal_grid=None)
+    thermal = s2.rename(NDVI="lst").assign(lst=lambda d: d["lst"] * 30)
 
-    assert result is not None
-    assert result.sizes["time"] == 2
-    assert "NDVI" in result and "NO2" in result
+    result = AnalysisWorkflow(request).run({"sentinel3": thermal, "sentinel2": s2, "sentinel5p": s5p})
+
+    # No outer join: each sensor keeps only its own acquisitions, no NaN-filled times.
+    assert set(result.predictors) == {"sentinel2", "sentinel5p"}
+    assert result.predictors["sentinel2"].time.values.tolist() == s2.time.values.tolist()
+    assert result.predictors["sentinel5p"].time.values.tolist() == s5p.time.values.tolist()
+    assert "NO2" not in result.predictors["sentinel2"]
 
 
 def test_stac_search_preserves_pagination_request():

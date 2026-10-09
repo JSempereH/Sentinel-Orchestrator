@@ -165,6 +165,31 @@ def artifact_from_path(
     return artifact
 
 
+def forecast_to_time(dataset: xr.Dataset) -> xr.Dataset:
+    """Flatten a forecast's (reference time, lead time) axes into one valid ``time``.
+
+    Forecast products (CAMS forecasts) index fields by run and lead time,
+    with ``valid_time`` = run + lead. Where several runs forecast the same
+    valid time, the shortest lead (the freshest forecast) is kept. Datasets
+    without those axes are returned unchanged.
+    """
+
+    if not {"forecast_reference_time", "forecast_period"}.issubset(dataset.dims):
+        return dataset
+    if "valid_time" in dataset.coords:
+        valid = dataset["valid_time"].transpose("forecast_period", "forecast_reference_time")
+    else:
+        valid = dataset["forecast_reference_time"] + dataset["forecast_period"]
+        valid = valid.transpose("forecast_period", "forecast_reference_time")
+    # forecast_period varies slowest, so the shortest lead comes first
+    # and survives drop_duplicates(keep="first").
+    stacked = dataset.drop_vars("valid_time", errors="ignore").stack(step=("forecast_period", "forecast_reference_time"))
+    # Drop the MultiIndex and its levels together (dropping single levels is deprecated).
+    stacked = stacked.drop_vars(["step", "forecast_period", "forecast_reference_time"])
+    stacked = stacked.assign_coords(time=("step", valid.values.reshape(-1))).swap_dims(step="time")
+    return stacked.drop_duplicates("time", keep="first").sortby("time").transpose("time", ...)
+
+
 def open_gridded_dataset(
     path: str | Path,
     *,
@@ -185,6 +210,7 @@ def open_gridded_dataset(
                 f"Cannot open {path}; install netCDF4 or cfgrib/eccodes"
             ) from exc
 
+    result = forecast_to_time(result)
     rename: dict[str, str] = {}
     for old, new in (("latitude", "y"), ("lat", "y"), ("longitude", "x"), ("lon", "x"), ("valid_time", "time")):
         if old in result.dims or old in result.coords:

@@ -1,74 +1,33 @@
 # Guides
 
-Worked, runnable notebooks showing how to use `sentinel_analysis` for a
-specific task end to end - not API reference, not synthetic-only demos.
-Each one narrates every step in markdown before the code that does it, so
-it can be read top to bottom without a running kernel, or executed for
-real against the sensors/providers it uses. An `_executed.ipynb` twin next
-to each source notebook is the last real run's actual output, committed as
-evidence rather than a claim.
+A series of notebooks that use the library on real data, end to end, with every step explained before the code that does it. They are committed with their outputs, so they can be read without running anything; running them again reproduces the analysis with whatever data the providers serve today.
 
-## Sentinel-3 land surface temperature over Berlin
+All of them use the same place and period (Berlin, August 2026), so downloads made by one are cached and reused by the next. Run them in order the first time.
 
-`notebooks/sentinel3_lst_demo.ipynb` - the CDSE OData catalogue, SAFE
-reading, the documented L2 LST exception flags, Kelvin-to-Celsius, and a
-two-week Berlin temperature series with both a time series and one spatial
-snapshot.
+| Notebook | What it shows |
+|---|---|
+| [`01_getting_started`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/01_getting_started.ipynb) | credential checks, cities and areas of interest, grids and chips, declarative requests saved as JSON, plans and size estimates, product discovery for every sensor, day and night passes, the command line |
+| [`02_land_surface_temperature`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/02_land_surface_temperature.ipynb) | Sentinel-3 LST end to end: scene quality, choosing clear scenes with a cloud probe before downloading them, maps, a gallery of clear scenes, time series, statistics, heat-hazard indicators, day versus night, writing Zarr, NetCDF, GeoTIFF, CSV and PNG, the SAFE reader and gridding by hand, server-side processing with openEO |
+| [`03_multisensor_fusion`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/03_multisensor_fusion.ipynb) | Sentinel-1/2/3/5P, Landsat, ECOSTRESS, ERA5, CAMS, OpenAQ and terrain fused in one request: matching in time, each source mapped, thermal sensors compared, NO2 from three sources and a column-to-surface estimate, air against surface temperature, how each source relates to LST |
+| [`04_downscaling`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/04_downscaling.ipynb) | per-scene sharpening to 100 m from one request, conservation of the observation, independent validation against Landsat, a blocked-holdout comparison of linear, Random Forest, XGBoost, local-window trees and TsHARP models, conformal prediction intervals, STARFM and ESTARFM |
+| [`05_animations`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/05_animations.ipynb) | animated GIFs and MP4s: three weeks of LST, observed against downscaled, a Sentinel-2 time-lapse, a map moving with its time series, Sentinel-5P NO2 |
+| [`06_worker_api`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/06_worker_api.ipynb) | the worker's HTTP API from Python: readiness, submitting a job, progress, logs, downloading and plotting the result, listing, cancelling and deleting jobs, rejected requests, the same with `curl` |
+| [`07_methane_plumes`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/07_methane_plumes.ipynb) | a confirmed leak from Carbon Mapper's live catalogue, a Sentinel-2 L1C detection and reference pair on the same tile, 2.5 km chips, the MBSP and MBMP methane retrievals, and how to tell a plume from surface change |
+| [`08_districts_and_zones`](https://github.com/JSempereH/Sentinel-Orchestrator/blob/main/notebooks/08_districts_and_zones.ipynb) | official Berlin district boundaries as a polygon AOI, simplifying a detailed outline, clipping results to the city, per-district and per-scene statistics of the 100 m temperature, warmer and cooler districts, CSV and GeoJSON outputs |
 
-```bash
-uv run --extra notebook --extra optical jupyter notebook notebooks/sentinel3_lst_demo.ipynb
-```
-
-## Multisensor thermal downscaling over Berlin
-
-`notebooks/berlin_multisensor_downscaling.ipynb` - the complete
-discover/download/fuse workflow (Sentinel-3 LST, Sentinel-2 predictors,
-optional Sentinel-5P and OpenAQ), then the coarse-consistent Random Forest
-baseline and an interactive observed-vs-modelled time slider. See
-[`downscaling.md`](downscaling.md) for what's validated on real data versus
-synthetic-only before trusting any one model's numbers from this notebook.
+## Running them
 
 ```bash
-uv run --extra notebook --extra ml --extra auxiliary --extra optical \
-  jupyter notebook notebooks/berlin_multisensor_downscaling.ipynb
+uv run --extra notebook --extra cdse --extra optical --extra cloud --extra landsat \
+  --extra ecostress --extra auxiliary --extra ml jupyter lab notebooks/
 ```
 
-## City temperature animation
+Credentials for each provider are described in [`setup.md`](setup.md); notebook 01 checks them all. Notebooks 05 and 08 read the results saved by earlier notebooks (02, 03 and 04), and notebook 06 needs a running worker (`make worker` or `docker compose up -d`).
 
-`notebooks/city_temperature_animation.ipynb` - turning a fused thermal
-cube into an animated map over time for one city.
+Outputs go to `output/notebooks/`, which Git ignores: `work/` holds the shared download and AOI-subset cache, `figures/` the PNG figures, `animations/` the GIFs and MP4s, and `0N_export/` what each notebook writes.
 
-```bash
-uv run --extra notebook --extra auxiliary --extra optical \
-  jupyter notebook notebooks/city_temperature_animation.ipynb
-```
+The first run of the whole series downloads several gigabytes (mostly whole-orbit Sentinel-5P products of about 600 MB each, and the Sentinel-2 L1C scenes of about 800 MB) and keeps only AOI subsets of most of it. Most notebooks peak under 0.6 GB of memory and 04 (which fits many models) at about 1.7 GB; run one at a time.
 
-## Methane point-source detection data: Sentinel-2 L1C + Carbon Mapper
+## What the outputs show, and do not
 
-`notebooks/methane_detection_carbon_mapper.ipynb` - assembles the *data*
-side of Varon et al. 2024 (Nat. Commun. s41467-024-47754-y): given one real
-airborne-confirmed methane leak from the
-[Carbon Mapper catalog](https://doi.org/10.5281/zenodo.7072824), finds and
-downloads a real reference/detection Sentinel-2 L1C pair around it
-(`Sentinel2Catalog(product_type=SENTINEL2_L1C_PRODUCT_TYPE)`,
-`select_temporal_pair`), reads both with `read_s2_l1c`, and plots the B12
-reflectance change the paper's model would be shown.
-
-Unlike the other guides, fetching and filtering the Carbon Mapper catalog
-itself is written as plain code in this notebook, not a library class - it
-is a static, one-off research dataset (one campaign, 2020-2021, never
-updated), not a general-purpose data source like ERA5/CAMS/OpenAQ, so it
-does not belong in `sentinel_analysis.providers`. This notebook is the
-demonstration of how to combine the library's generic pieces
-(`AssetCache`, `http_session`, the CDSE catalogue, `select_temporal_pair`)
-with a one-off external dataset, not a reason to add one.
-
-**Explicitly out of scope**, called out again at the end of the notebook:
-the paper's synthetic training-data generator (a Gaussian plume dispersion
-model plus Beer-Lambert absorption, injected into real background scenes)
-and the deep-learning model itself. This guide gets you real validation
-data in the paper's shape, not a trained detector.
-
-```bash
-uv run --extra notebook --extra optical jupyter notebook notebooks/methane_detection_carbon_mapper.ipynb
-```
+The notebooks report what the data says, including when a method does not win: notebook 04 compares the sharpened map with an independent Landsat scene and prints whether it beats simply repeating the 1 km value, and notebook 07 explains why a single Sentinel-2 pair often shows no clear plume even for a confirmed leak. Results depend on clouds and on what the providers serve on the day they are run.

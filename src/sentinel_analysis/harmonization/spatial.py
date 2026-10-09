@@ -40,6 +40,26 @@ def _restore_boolean(source_dtype: np.dtype, regridded: xr.DataArray) -> xr.Data
     return regridded.fillna(0).astype(bool)
 
 
+def _spacing(cube: xr.Dataset) -> tuple[float, float]:
+    """Cell size (dx, dy) of a regular grid.
+
+    A small AOI can fall inside a single row or column of a coarse source
+    (one 0.25 degree ERA5 row over a city): that axis then borrows the other
+    axis' spacing, or the declared ``resolution_deg``.
+    """
+
+    def step(values: np.ndarray) -> float | None:
+        return float(abs(values[1] - values[0])) if values.size > 1 else None
+
+    dx, dy = step(cube.x.values), step(cube.y.values)
+    declared = cube.attrs.get("resolution_deg")
+    dx = dx if dx is not None else (dy if dy is not None else declared)
+    dy = dy if dy is not None else (dx if dx is not None else declared)
+    if dx is None or dy is None:
+        raise CubeValidationError("A one-cell grid needs a 'resolution_deg' attribute to be regridded")
+    return float(dx), float(dy)
+
+
 def harmonize_spatial(
     target: xr.Dataset,
     source: xr.Dataset,
@@ -58,8 +78,8 @@ def harmonize_spatial(
     policy = policy or SpatialResamplingPolicy()
     target_crs = target.attrs.get("crs")
     source_crs = source.attrs.get("crs")
-    target_resolution = float(abs(target.x.values[1] - target.x.values[0]))
-    source_resolution = float(abs(source.x.values[1] - source.x.values[0]))
+    target_resolution = _spacing(target)[0]
+    source_resolution = _spacing(source)[0]
     if target_crs == source_crs:
         result = xr.Dataset(attrs={**source.attrs, "crs": target_crs, "grid_id": target.attrs.get("grid_id", "")})
         template = next(iter(target.data_vars.values()))
@@ -89,8 +109,8 @@ def harmonize_spatial(
         raise RuntimeError("Install sentinel-analysis[optical] or sentinel-analysis[sar] for CRS reprojection") from exc
     if target_crs is None or source_crs is None:
         raise CubeValidationError("Both cubes must declare CRS before reprojection")
-    if target.x.size < 2 or target.y.size < 2 or source.x.size < 2 or source.y.size < 2:
-        raise CubeValidationError("Reprojection requires regular grids with at least two coordinates per axis")
+    if target.x.size < 2 or target.y.size < 2:
+        raise CubeValidationError("Reprojection requires a target grid with at least two coordinates per axis")
     # The transforms below place row 0 at the *top* (max y) and column 0 at
     # the left, so the arrays must be north-up and west-to-east. Sources with
     # ascending y - every grid_s5p output, latitude-ascending ERA5/CAMS files
@@ -98,10 +118,8 @@ def harmonize_spatial(
     source = source.sortby("x").sortby("y", ascending=False)
 
     def transform(data: xr.DataArray, *, method: str) -> xr.DataArray:
-        dx = float(abs(source.x.values[1] - source.x.values[0]))
-        dy = float(abs(source.y.values[1] - source.y.values[0]))
-        target_dx = float(abs(target.x.values[1] - target.x.values[0]))
-        target_dy = float(abs(target.y.values[1] - target.y.values[0]))
+        dx, dy = _spacing(source)
+        target_dx, target_dy = _spacing(target)
         source_transform = from_origin(float(source.x.values.min() - dx / 2), float(source.y.values.max() + dy / 2), dx, dy)
         target_transform = from_origin(float(target.x.values.min() - target_dx / 2), float(target.y.values.max() + target_dy / 2), target_dx, target_dy)
         resampling = {"nearest": Resampling.nearest, "mean": Resampling.average}.get(method, Resampling.bilinear)

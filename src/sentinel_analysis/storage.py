@@ -3,10 +3,89 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+import threading
+from typing import Any, Hashable, Literal
 
 import numpy as np
 import xarray as xr
+
+
+# The HDF5 library underneath netCDF4 keeps global state that is not thread
+# safe, even across different files: concurrent reads and writes from the
+# product threads of AnalysisWorkflow.execute(max_workers>1) segfaulted the
+# process (reproduced 3 of 3 runs with 4 threads; 0 of 3 with this lock).
+# Every NetCDF read or write the library does from worker threads holds it.
+NETCDF_LOCK = threading.RLock()
+
+
+def netcdf_safe(dataset: xr.Dataset) -> xr.Dataset:
+    """A copy whose attributes NetCDF can store.
+
+    NetCDF attributes cannot be booleans, ``None`` or nested values, which
+    the analysis cubes use for provenance (``pixel_footprints_reconstructed``,
+    skipped-scene lists, ...): booleans become 0/1, numeric lists arrays,
+    ``None`` is dropped and anything else is stored as its string form.
+    """
+
+    def clean(attrs: dict) -> dict:
+        result: dict[str, Any] = {}
+        for key, value in attrs.items():
+            if value is None:
+                continue
+            if isinstance(value, (bool, np.bool_)):
+                result[key] = int(value)
+            elif isinstance(value, (str, int, float, np.integer, np.floating)):
+                result[key] = value
+            elif isinstance(value, np.ndarray) and value.dtype != bool:
+                result[key] = value
+            elif isinstance(value, (list, tuple, np.ndarray)) and all(isinstance(item, (int, float, np.integer, np.floating, np.bool_)) for item in value):
+                result[key] = np.asarray(value, dtype=float if any(isinstance(item, (float, np.floating)) for item in value) else int)
+            else:
+                result[key] = str(value)
+        return result
+
+    safe = dataset.copy()
+    safe.attrs = clean(dict(safe.attrs))
+    for name in list(safe.variables):
+        safe[name].attrs = clean(dict(safe[name].attrs))
+        safe[name].encoding = {}
+    return safe
+
+
+def write_netcdf(dataset: xr.Dataset, path: str | Path) -> Path:
+    """Write a cube to NetCDF, coercing attributes NetCDF cannot hold (see ``netcdf_safe``)."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe = netcdf_safe(dataset)
+    with NETCDF_LOCK:
+        safe.to_netcdf(path, encoding=_datetime_encoding(safe))
+    return path
+
+
+def _datetime_encoding(dataset: xr.Dataset) -> dict[Hashable, dict[str, Any]]:
+    """Exact, readable encodings for every datetime variable.
+
+    Acquisition times carry microseconds, which xarray's default
+    "days since ..." cannot hold. Integer microseconds work for complete
+    variables, but integer-encoded NaT cannot be decoded again from Zarr v2
+    or NetCDF (``*_matched_time`` is NaT wherever a source had no match), so variables
+    with gaps are stored as float microseconds since their own first day:
+    small offsets that float64 represents exactly at microsecond precision.
+    """
+
+    encoding: dict[Hashable, dict[str, Any]] = {}
+    for name, variable in dataset.variables.items():
+        if not np.issubdtype(variable.dtype, np.datetime64):
+            continue
+        values = np.asarray(variable.values).astype("datetime64[ns]")
+        if not np.isnat(values).any():
+            encoding[name] = {"units": "microseconds since 1970-01-01", "dtype": "int64"}
+            continue
+        finite = values[~np.isnat(values)]
+        epoch = str(finite.min().astype("datetime64[D]")) if finite.size else "1970-01-01"
+        encoding[name] = {"units": f"microseconds since {epoch}", "dtype": "float64"}
+    return encoding
 
 
 def write_zarr(
@@ -24,7 +103,13 @@ def write_zarr(
         raise RuntimeError("Install sentinel-analysis[cloud] to write Zarr stores") from exc
     # Zarr v2 is currently the interoperable format for xarray and common
     # cloud readers; zarr v3 metadata support is still uneven across versions.
-    dataset.to_zarr(store, mode=mode, consolidated=consolidated, zarr_format=2)
+    encoding = _datetime_encoding(dataset) if mode in ("w", "w-") else None
+    if encoding:
+        # A time read back from NetCDF keeps that file's encoding; replace it.
+        dataset = dataset.copy()
+        for name in encoding:
+            dataset[name].encoding = {}
+    dataset.to_zarr(store, mode=mode, consolidated=consolidated, zarr_format=2, encoding=encoding)
 
 
 def open_zarr(store: str | Path, *, chunks: str = "auto") -> xr.Dataset:
@@ -131,7 +216,8 @@ def validate_cog(path: str | Path) -> dict[str, object]:
     with rasterio.open(path) as source:
         if source.crs is None:
             raise ValueError("COG has no CRS")
-        if not source.is_tiled:
+        tiled = bool(source.profile.get("tiled", False))  # rasterio's is_tiled is deprecated
+        if not tiled:
             raise ValueError("COG is not tiled")
         return {
             "width": source.width,
@@ -139,5 +225,5 @@ def validate_cog(path: str | Path) -> dict[str, object]:
             "count": source.count,
             "crs": source.crs.to_string(),
             "overviews": [source.overviews(index) for index in range(1, source.count + 1)],
-            "tiled": source.is_tiled,
+            "tiled": tiled,
         }

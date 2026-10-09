@@ -18,13 +18,31 @@ class _Downscaler(Protocol):
     def predict(self, predictors: xr.Dataset) -> xr.Dataset: ...
 
 
+CORRECTIONS = ("block", "smooth")
+
+
 @dataclass(frozen=True)
 class CoarseConsistentDownscaler:
-    """Apply a downscaler while conserving the observed coarse target."""
+    """Apply a downscaler while conserving the observed coarse target.
+
+    ``correction="block"`` adds each coarse cell's residual (observed minus
+    aggregated prediction) uniformly to its fine cells: exact conservation,
+    but visible coarse-cell steps where the residual is large.
+    ``"smooth"`` interpolates the residual bilinearly and repeats
+    aggregate-and-correct ``smoothing_iterations`` times, which removes the
+    steps and conserves the observation to within a few hundredths of a
+    kelvin (reported as ``coarse_consistency_rmse``).
+    """
 
     base_model: _Downscaler
     target: str = "lst"
     conservation_tolerance: float = 0.25
+    correction: str = "block"
+    smoothing_iterations: int = 10
+
+    def __post_init__(self) -> None:
+        if self.correction not in CORRECTIONS:
+            raise ValueError(f"correction must be one of {CORRECTIONS}")
 
     def predict(self, predictors: xr.Dataset, coarse_reference: xr.Dataset | xr.DataArray) -> xr.Dataset:
         """Predict a fine grid and remove the coarse-scale aggregation residual."""
@@ -38,8 +56,11 @@ class CoarseConsistentDownscaler:
         aggregated = reaggregate_to_target(prediction, coarse)
         coarse_for_prediction = coarse.reindex(time=prediction.time, method="nearest")
         residual = coarse_for_prediction - aggregated
-        correction = residual.reindex(time=prediction.time, method="nearest")
-        correction = correction.reindex(y=prediction.y, x=prediction.x, method="nearest").fillna(0)
+        if self.correction == "smooth":
+            correction = self._smooth_correction(prediction.where(raw["downscaled_support"]), coarse, coarse_for_prediction)
+        else:
+            correction = residual.reindex(time=prediction.time, method="nearest")
+            correction = correction.reindex(y=prediction.y, x=prediction.x, method="nearest").fillna(0)
         corrected = (prediction + correction).where(raw["downscaled_support"])
         corrected_aggregate = reaggregate_to_target(corrected, coarse)
         corrected_aggregate = corrected_aggregate.reindex(time=prediction.time, method="nearest")
@@ -51,6 +72,8 @@ class CoarseConsistentDownscaler:
             "downscaled_support": raw["downscaled_support"],
             "coarse_consistency_correction": correction,
         })
+        if "downscaled_extrapolation" in raw:
+            result["downscaled_extrapolation"] = raw["downscaled_extrapolation"]
         result.attrs.update({
             **raw.attrs,
             "downscaling_method": f"coarse_consistent_{raw.attrs.get('downscaling_method', 'model')}",
@@ -59,8 +82,32 @@ class CoarseConsistentDownscaler:
             "coarse_consistency_mae": float(metrics["mae"]),
             "coarse_consistency_tolerance": self.conservation_tolerance,
             "coarse_consistency_within_tolerance": bool(float(metrics["rmse"]) <= self.conservation_tolerance),
+            "coarse_consistency_correction_method": self.correction,
         })
         return result
+
+    def _smooth_correction(self, prediction: xr.DataArray, coarse: xr.DataArray, coarse_for_prediction: xr.DataArray) -> xr.DataArray:
+        """Iteratively add the bilinearly interpolated coarse residual.
+
+        Coarse cells without an observation contribute no residual (zero),
+        so the correction fades smoothly across them instead of stepping.
+        """
+
+        correction = xr.zeros_like(prediction).fillna(0)
+        for _ in range(self.smoothing_iterations):
+            aggregated = reaggregate_to_target(prediction + correction, coarse).reindex(time=prediction.time, method="nearest")
+            residual = (coarse_for_prediction - aggregated).fillna(0)
+            correction = correction + _bilinear_to(residual, prediction)
+        return correction
+
+
+def _bilinear_to(coarse: xr.DataArray, fine: xr.DataArray) -> xr.DataArray:
+    """Interpolate a coarse field bilinearly onto a fine grid, nearest beyond the outer cell centres."""
+
+    ordered = coarse.sortby("y").sortby("x")
+    interpolated = ordered.interp(y=fine.y, x=fine.x, method="linear")
+    edges = ordered.reindex(y=fine.y, x=fine.x, method="nearest")
+    return interpolated.combine_first(edges).transpose(*fine.dims)
 
 
 def reaggregate_to_target(fine: xr.DataArray, target: xr.DataArray) -> xr.DataArray:
@@ -96,7 +143,10 @@ def reaggregate_to_target(fine: xr.DataArray, target: xr.DataArray) -> xr.DataAr
         return output.reshape((*values.shape[:-2], *shape))
 
     # apply_ufunc keeps dask-backed inputs lazy (one task per non-spatial
-    # chunk, e.g. per time chunk) instead of loading the whole cube.
+    # chunk, e.g. per time chunk) instead of loading the whole cube. Each map
+    # must be one chunk in y and x (Zarr stores are often tiled spatially).
+    if fine.chunks is not None:
+        fine = fine.chunk({"y": -1, "x": -1})
     result = xr.apply_ufunc(
         aggregate,
         fine,

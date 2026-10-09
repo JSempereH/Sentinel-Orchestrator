@@ -38,6 +38,8 @@ ERA5_VARIABLES: Mapping[str, Mapping[str, str]] = {
     "boundary_layer_height": {"api": "boundary_layer_height", "source": "blh", "units": "m", "standard_name": "atmosphere_boundary_layer_thickness"},
     "mean_sea_level_pressure": {"api": "mean_sea_level_pressure", "source": "msl", "units": "Pa", "standard_name": "air_pressure_at_mean_sea_level"},
 }
+# Atmospheric variables ERA5-Land (a land-surface model run) does not provide.
+ERA5_LAND_UNAVAILABLE = {"boundary_layer_height"}
 ERA5_SOURCE_TO_NAME = {value["source"]: name for name, value in ERA5_VARIABLES.items()}
 
 
@@ -117,6 +119,9 @@ class ERA5Provider:
     ) -> AuxiliaryArtifact:
         dataset = spec.dataset or self.config.dataset
         variables = self.variables_for(spec)
+        missing = sorted(set(variables) & ERA5_LAND_UNAVAILABLE) if "land" in dataset else []
+        if missing:
+            raise ValueError(f"{dataset} has no {missing}; request them from 'reanalysis-era5-single-levels' (AuxiliarySpec(dataset=...))")
         request = self.build_request(aoi, start, end, variables=variables)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

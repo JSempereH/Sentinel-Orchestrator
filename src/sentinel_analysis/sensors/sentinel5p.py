@@ -255,11 +255,55 @@ def read_s5p_l2(
     return apply_variable_contract(result, sensor="Sentinel-5P", product=SENTINEL5P_PRODUCT_TYPES[gas], source=str(path))
 
 
-def grid_s5p(dataset: xr.Dataset, *, resolution_deg: float = 0.01, aoi: AOI | None = None) -> xr.Dataset:
-    """Bin a quality-filtered TROPOMI swath onto a regular EPSG:4326 grid."""
+# Half the diagonal of a TROPOMI nadir pixel (5.5 x 3.5 km since 2019).
+TROPOMI_FOOTPRINT_RADIUS_KM = 3.5
+
+
+def _fill_footprints(grid: np.ndarray, lat_centres: np.ndarray, lon_centres: np.ndarray,
+                     lat: np.ndarray, lon: np.ndarray, values: np.ndarray, radius_km: float) -> None:
+    """Fill empty cells in place with the nearest pixel within ``radius_km``."""
+
+    empty = np.isnan(grid)
+    if not empty.any() or values.size == 0:
+        return
+    rows, cols = np.nonzero(empty)
+    # Local equirectangular kilometres: accurate to well under 1 % over a swath's few kilometres.
+    scale = np.cos(np.radians(np.nanmean(lat)))
+    cells = np.column_stack([lat_centres[rows] * 110.574, lon_centres[cols] * 111.320 * scale])
+    pixels = np.column_stack([lat * 110.574, lon * 111.320 * scale])
+    try:
+        from scipy.spatial import cKDTree
+
+        distance, nearest = cKDTree(pixels).query(cells, distance_upper_bound=radius_km)
+        found = np.isfinite(distance)
+    except ImportError:  # small AOIs only: one distance per cell and pixel
+        squared = ((cells[:, None, :] - pixels[None, :, :]) ** 2).sum(-1)
+        nearest = squared.argmin(1)
+        found = squared[np.arange(len(cells)), nearest] <= radius_km**2
+    grid[rows[found], cols[found]] = values[nearest[found]]
+
+
+def grid_s5p(
+    dataset: xr.Dataset,
+    *,
+    resolution_deg: float = 0.01,
+    aoi: AOI | None = None,
+    footprint_radius_km: float | None = TROPOMI_FOOTPRINT_RADIUS_KM,
+) -> xr.Dataset:
+    """Grid a quality-filtered TROPOMI swath onto a regular EPSG:4326 grid.
+
+    Cells containing pixel centres get their mean. A TROPOMI pixel covers
+    several kilometres, far more than one 0.01 degree cell, so binning
+    centres alone left most cells empty (a fully valid Berlin overpass
+    filled 3.5 % of the grid). With ``footprint_radius_km`` the remaining
+    cells take the nearest valid pixel whose centre lies within that
+    distance, i.e. inside its footprint; ``None`` keeps centres only.
+    """
 
     if resolution_deg <= 0:
         raise ValueError("resolution_deg must be positive")
+    if footprint_radius_km is not None and footprint_radius_km <= 0:
+        raise ValueError("footprint_radius_km must be positive")
     gas = str(dataset.attrs.get("gas", "NO2"))
     validate_observation_set(dataset, required_variables=(gas,))
     values = np.asarray(dataset[gas].values)
@@ -270,7 +314,10 @@ def grid_s5p(dataset: xr.Dataset, *, resolution_deg: float = 0.01, aoi: AOI | No
     valid = np.isfinite(values) & np.isfinite(lat) & np.isfinite(lon)
     valid &= np.asarray(dataset["valid_mask"].values, dtype=bool)
     if aoi is not None:
-        valid &= (lat >= aoi.south) & (lat <= aoi.north) & (lon >= aoi.west) & (lon <= aoi.east)
+        # Pixels centred just outside the AOI still cover its edge.
+        pad_lat = (footprint_radius_km or 0.0) / 110.574
+        pad_lon = pad_lat / max(np.cos(np.radians((aoi.south + aoi.north) / 2)), 0.1)
+        valid &= (lat >= aoi.south - pad_lat) & (lat <= aoi.north + pad_lat) & (lon >= aoi.west - pad_lon) & (lon <= aoi.east + pad_lon)
     if not valid.any():
         raise ValueError("Sentinel-5P swath has no valid observations in the requested AOI")
     if aoi is not None:
@@ -289,6 +336,9 @@ def grid_s5p(dataset: xr.Dataset, *, resolution_deg: float = 0.01, aoi: AOI | No
         sums, _, _ = np.histogram2d(lat[index][mask], lon[index][mask], bins=(y_edges, x_edges), weights=values[index][mask])
         counts, _, _ = np.histogram2d(lat[index][mask], lon[index][mask], bins=(y_edges, x_edges))
         output[index] = np.divide(sums, counts, out=np.full_like(sums, np.nan), where=counts > 0)
+        if footprint_radius_km is not None:
+            _fill_footprints(output[index], (y_edges[:-1] + y_edges[1:]) / 2, (x_edges[:-1] + x_edges[1:]) / 2,
+                             lat[index][mask], lon[index][mask], values[index][mask], footprint_radius_km)
     result = xr.Dataset(
         {gas: (("time", "y", "x"), output)},
         coords={
@@ -299,6 +349,7 @@ def grid_s5p(dataset: xr.Dataset, *, resolution_deg: float = 0.01, aoi: AOI | No
         attrs={**dataset.attrs, "analysis_shape": "regular_grid", "crs": "EPSG:4326", "resolution_deg": resolution_deg},
     )
     result["valid_mask"] = np.isfinite(result[gas])
+    result.attrs["footprint_radius_km"] = footprint_radius_km if footprint_radius_km is not None else "none (pixel centres only)"
     return apply_variable_contract(
         result,
         sensor="Sentinel-5P",

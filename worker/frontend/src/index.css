@@ -192,6 +192,7 @@ textarea.input { resize: vertical; min-height: 72px; }
 .badge-running  { background: var(--warning-light); color: var(--warning); }
 .badge-succeeded { background: var(--success-light); color: var(--success); }
 .badge-failed   { background: var(--danger-light); color: var(--danger); }
+.badge-cancelled { background: #f1f5f9; color: var(--text-muted); }
 
 /* Table */
 .table { width: 100%; border-collapse: collapse; }

@@ -7,6 +7,8 @@ no credentials - so it is checked directly against known reference values
 rather than mocked.
 """
 
+import pytest
+
 from app.runner import build_request
 from sentinel_analysis.config import AOI
 from sentinel_analysis.cube import projected_bounds as _projected_bounds
@@ -58,6 +60,27 @@ def test_build_request_from_simple_aoi_payload():
     # Thermal grid defaults to max(1000, resolution_m) when not given explicitly.
     assert request.thermal_grid is not None
     assert request.thermal_grid.resolution_m == 1000
+
+
+def test_build_request_keeps_a_drawn_polygon():
+    triangle = {"type": "Polygon", "coordinates": [[[13.3, 52.4], [13.5, 52.4], [13.4, 52.6], [13.3, 52.4]]]}
+    payload = {
+        "aoi": {"west": 13.3, "south": 52.4, "east": 13.5, "north": 52.6, "geometry": triangle},
+        "start": "2024-06-01",
+        "end": "2024-06-05",
+        "sensors": ["sentinel3"],
+    }
+    request = build_request(payload)
+    assert request.aoi.has_geometry
+    assert (request.aoi.west, request.aoi.north) == pytest.approx((13.3, 52.6))
+    assert request.to_dict()["aoi"]["geometry"]["type"] == "Polygon"
+
+
+def test_build_request_rejects_an_unusable_polygon():
+    line = {"type": "LineString", "coordinates": [[13.3, 52.4], [13.5, 52.6]]}
+    with pytest.raises(ValueError):
+        build_request({"aoi": {"west": 13.3, "south": 52.4, "east": 13.5, "north": 52.6, "geometry": line},
+                       "start": "2024-06-01", "end": "2024-06-05", "sensors": ["sentinel3"]})
 
 
 def test_build_request_honours_explicit_thermal_resolution():

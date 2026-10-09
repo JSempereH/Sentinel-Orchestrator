@@ -138,7 +138,7 @@ optimistic; pass a block several kilometres wide (`block_size=5` on a 1 km
 thermal grid) for a genuinely spatial test. The split refuses an unsorted
 time index, since "the latest acquisitions" is taken by position (cubes
 produced before the time-ordering fix were unsorted, so earlier benchmark
-runs' temporal holdout was not the final period - see `roadmap.md`).
+runs' temporal holdout was not the final period - see `history.md`).
 
 ### Calibrated prediction intervals
 
@@ -207,6 +207,17 @@ regression.
 
 ## Implemented Model APIs
 
+`downscale_per_scene(cube, predictors["sentinel2"], ...)` is the end-to-end
+entry point and what `AnalysisRequest.downscale` runs: one `"linear"`,
+`"random_forest"`, `"xgboost"` or `"local_trees"` model per coarse scene, fitted on that
+scene's own cells, predicting its matched fine predictors (Sentinel-2 by
+default, with `cos_incidence` recomputed at the thermal acquisition time),
+wrapped by default in `CoarseConsistentDownscaler`. Per-scene
+`coarse_consistency_rmse` and `downscaling_training_samples` are variables
+along `time`; skipped scenes are listed in `downscaling_skipped_scenes`. The
+building blocks below remain available for other protocols (pooled
+training, GWR, conformal intervals, spatiotemporal fusion).
+
 The package now exposes `fit_tsharp_downscaler` and
 `fit_coarse_consistent_tsharp_downscaler` for the interpretable one-predictor
 TsHARP/DisTrad relation. `fit_xgboost_downscaler` and
@@ -262,39 +273,60 @@ blindly; a pair with no local coarse variance to regress against (e.g. a
 uniform patch) falls back to STARFM's own identity-slope behavior rather
 than being dropped. FSDAF remains an unimplemented open follow-up.
 
-## Temporal Berlin Notebook
+## Worked Example
 
-`notebooks/berlin_multisensor_downscaling.ipynb` demonstrates the complete
-Berlin workflow over a three-day window. It discovers and downloads Sentinel-3
-LST, Sentinel-2 predictors, optional Sentinel-5P columns and OpenAQ stations,
-then builds the fused cube, trains the coarse-consistent Random Forest baseline,
-and renders an interactive time slider with observed and modelled map layers.
+[`notebooks/04_downscaling.ipynb`](guides.md) runs the whole chain on real data
+over Berlin, August 2026: per-scene downscaling from one request
+(`DownscaleSpec`), conservation of the observed scene, an independent
+comparison with Landsat at 100 m, a blocked-holdout comparison of linear,
+Random Forest, XGBoost and TsHARP models, conformal intervals, and STARFM and
+ESTARFM between two Landsat dates. It prints its verdicts from the data,
+including where the sharpened map does not beat the 1 km observation.
+[`05_animations.ipynb`](guides.md) animates observed against downscaled
+scenes.
 
-The default notebook configuration uses Sentinel-3 and Sentinel-2 to keep a
-fresh run practical. Enable Sentinel-5P explicitly when the selected dates have
-valid TROPOMI pixels over Berlin:
+## Local windows against Landsat (2026-10-09)
 
-```bash
-SENTINEL_NOTEBOOK_LIVE=1 \
-SENTINEL_NOTEBOOK_SENSORS=sentinel3,sentinel2,sentinel5p \
-uv run --extra notebook --extra ml --extra auxiliary --extra optical \
-  jupyter notebook notebooks/berlin_multisensor_downscaling.ipynb
-```
+`model="local_trees"` follows the Data Mining Sharpener (pyDMS): a global
+model plus one model per moving window of coarse cells (each trained on its
+window extended by 25 %), bagged trees with linear leaves, blended by the
+inverse squared residual of each model on its own cells, in radiance.
 
-The date range, product limit, predictor resolution and output directory are
-controlled by `SENTINEL_NOTEBOOK_START`, `SENTINEL_NOTEBOOK_END`,
-`SENTINEL_NOTEBOOK_MAX_PRODUCTS`, `SENTINEL_NOTEBOOK_RESOLUTION_M` and
-`SENTINEL_NOTEBOOK_OUTPUT`. Generated NetCDF cubes and the static dashboard
-are written to the selected output directory. A missing or low-quality
-Sentinel-5P overpass is reported and skipped; it must not be interpreted as a
-zero concentration field.
+`scripts/validate_downscaling_landsat.py`, Berlin, 1 to 21 August 2026:
+20 daytime Sentinel-3 scenes (15 downscaled, 5 without a Sentinel-2 match),
+Sentinel-2 indices and terrain as predictors. Landsat is never used for
+training. Two Landsat passes fell on the same morning as a Sentinel-3 scene.
+Each cell is downscaled / repeated 1 km observation (K).
+
+| model | holdout RMSE (1 km) | Landsat A: RMSE, r, pattern RMSE | Landsat B: RMSE, r, pattern RMSE |
+|---|---|---|---|
+| linear | 2.19 | 2.94/2.97, 0.49/0.45, 2.49/2.53 | 2.14/2.28, 0.67/0.51, 1.89/2.04 |
+| random_forest | 2.31 | 3.04/2.97, 0.45/0.45, 2.61/2.53 | 2.54/2.28, 0.58/0.51, 2.33/2.04 |
+| local_trees, window 5 | 2.20 | 3.00/2.97, 0.45/0.45, 2.55/2.53 | 2.07/2.28, 0.66/0.51, 1.81/2.04 |
+| **local_trees, window 10** | **2.04** | 3.00/2.97, 0.46/0.45, 2.57/2.53 | **2.07/2.28, 0.66/0.51, 1.80/2.04** |
+| local_trees, window 15 | 2.09 | 3.00/2.97, 0.46/0.45, 2.56/2.53 | 2.14/2.28, 0.65/0.51, 1.89/2.04 |
+
+- On Landsat B every model except the Random Forest beats the repeated
+  1 km map; window 10 does best (RMSE -0.21 K, correlation 0.66 against
+  0.51, spatial pattern error -0.24 K).
+- On Landsat A nothing beats it: all models are within ±0.1 K of the
+  baseline. The offset between the two sensors dominates that scene.
+- On the blocked holdout window 10 is the best model of all (2.04 K against
+  2.19 K for linear and 2.31 K for the Random Forest), so it is the default
+  `window`.
+- The Random Forest, the previous workflow default, is the worst model
+  here on every measure.
+
+Two Landsat scenes in one city are a small sample: treat this as "local
+windows help and never hurt much", not as a measured gain. Peak memory of the
+whole validation was 0.5 GB.
 
 ## Benchmark Results (multi-city)
 
 `scripts/benchmark_multicity.py` (results in
 `output/multicity-benchmark/results_v2.json`) runs five preset cities in
 two periods (1-14 August and 1-14 April 2026), produced after the
-Sentinel-3 orientation, cloud-mask and quality-flag fixes (`roadmap.md`).
+Sentinel-3 orientation, cloud-mask and quality-flag fixes (`history.md`).
 
 **Setup.** Daytime Sentinel-3 passes only (local solar time 08-16 h);
 Sentinel-2 L2A from STAC COGs at 100 m; 1 km thermal grid. Holdout: the
@@ -357,20 +389,52 @@ Guadalajara and Lagos in August had too few clear daytime observations
   calibration days are not exchangeable with the validation days. Next
   step: calibrate on scene-corrected residuals.
 
-**Recommendation.** Use terrain predictors; downscale per scene and anchor
-to the observed coarse LST (`fit_coarse_consistent_random_forest_downscaler`
-or pyDMS with its residual correction). Do not add model complexity before
-the uncertainty calibration above is fixed.
+**Recommendation.** Use terrain predictors and daytime passes only;
+downscale per scene and anchor to the observed coarse LST. The library
+implements exactly this as `downscale_per_scene` and the workflow's
+`AnalysisRequest(downscale=DownscaleSpec(...), thermal_overpass="day",
+terrain_predictors=True)` stage (see "Implemented Model APIs"); pyDMS with
+its residual correction remains the external reference. Do not add model
+complexity before the uncertainty calibration above is fixed.
 
 ## Benchmark Results
 
-> **These Berlin results (Runs 1-3 and the STARFM real-reference check) are
-> invalid.** They were produced before two Sentinel-3 fixes: the default
-> area gridding flipped every LST scene north-south, and the reader's cloud
-> mask let most clouds through (see `roadmap.md`). The models were trained
-> on upside-down, cloud-contaminated targets, which is consistent with the
-> near-zero correlations reported below. They are kept only as a record;
-> see "Benchmark Results (multi-city)" for numbers produced after the fixes.
+> **Runs 1-3 below are invalid.** They were produced before two Sentinel-3
+> fixes: the default area gridding flipped every LST scene north-south, and
+> the reader's cloud mask let most clouds through (see `history.md`). The
+> models were trained on upside-down, cloud-contaminated targets, which is
+> consistent with their near-zero correlations. They are kept only as a
+> record. **Run 4** is the same benchmark re-run after the fixes.
+
+### Run 4: after the Sentinel-3 fixes (2026-10-08)
+
+Same window as Runs 2-3 (2026-08-01 to 2026-08-27, 24 products per sensor,
+100 m predictors, Berlin), now with daytime passes only
+(`thermal_overpass="day"`). Fused cube: 24 coarse observations, 898 held-out
+real observations; 54 minutes, peak RSS 1.5 GB.
+
+| Model | RMSE (K) | MAE (K) | Bias (K) | Correlation | Coverage |
+|---|---|---|---|---|---|
+| TsHARP (NDVI) | 4.78 | 3.73 | 3.69 | 0.47 | 95.8 % |
+| OLS | 5.17 | 4.63 | 4.56 | 0.71 | 95.8 % |
+| XGBoost (regularized) | 5.25 | 4.77 | 4.66 | 0.73 | 95.8 % |
+| Random Forest (shallow) | 5.49 | 4.95 | 4.81 | 0.73 | 95.8 % |
+| Random Forest (default) | 5.51 | 4.97 | 4.84 | 0.73 | 95.8 % |
+| XGBoost (default) | 5.73 | 5.18 | 5.06 | 0.70 | 95.8 % |
+| GWR (15x bandwidth) | 7.36 | 5.67 | 5.46 | -0.05 | 10.0 % |
+| GWR (5x bandwidth) | 7.57 | 6.07 | 5.60 | 0.00 | 10.0 % |
+| STARFM (sanity check) | 5.06 | 4.27 | - | - | - |
+
+**Reading.** Correlations rose from near zero (Runs 2-3) to ~0.7: the
+models now learn a real spatial pattern, which confirms the flip and
+cloud-mask diagnosis. RMSE is dominated by a +3.7 to +5.1 K bias, not by
+spatial error: this script uses the *pooled* protocol (one model for all
+training days, scored on later days), which cannot know a new day's
+temperature level. That is exactly why the multi-city benchmark above
+anchors each scene to its observed coarse field, and why the library's
+downscaling stage is per scene. GWR's 10 % coverage is unchanged by the
+fixes, so it is a property of its local-sample requirement under this
+holdout, not of the data.
 
 `scripts/benchmark_downscalers.py` fetches one real, live Sentinel-3 LST +
 Sentinel-2 predictor cube over Berlin and evaluates every baseline in
@@ -405,7 +469,7 @@ ensembles. Run 2 below shows that conclusion did not survive more data.
 `BENCHMARK_START=2026-08-01`, `BENCHMARK_END=2026-08-27` (24 products/sensor,
 `max_workers=1` - this machine froze twice running two such live fetches
 concurrently at `max_workers=2`; serial processing is slower but safe, see
-`docs/roadmap.md`). Fused cube: 24 real coarse observations, 664 validation
+`docs/history.md`). Fused cube: 24 real coarse observations, 664 validation
 pixels:
 
 | Model | RMSE (K) | MAE (K) | Bias (K) | Correlation | Coverage |
@@ -519,6 +583,21 @@ rmse to 3 decimal places.)
   real numbers before changing any parameter.
 
 ### STARFM against a real independent reference
+
+**Re-run after the Sentinel-3 fixes (2026-10-08, daytime passes only).**
+`fine_t0` is the real Landsat 9 scene of 2026-08-15, t0 the nearest
+Sentinel-3 pass (same morning), t1 the latest one (2026-09-15, a 31-day
+gap), and a real Landsat 8 scene of 2026-09-15 serves as independent
+full-resolution reference:
+
+- **Coarse-scale conservation: rmse=1.58 K, mae=1.32 K** (outside the 1 K
+  tolerance, better than the 2.15 K below).
+- **Full resolution against the independent Landsat scene: rmse=2.68 K,
+  mae=1.99 K over 17,293 pixels**, the first valid full-resolution STARFM
+  number (the earlier attempt below caught a bug instead), over a month of
+  real change that single-pair STARFM is not designed for.
+
+The original (pre-fix) run follows as a record.
 
 `scripts/validate_starfm_real_reference.py` closes the gap the sanity
 checks above leave open: it uses a real Landsat 8/9 scene as `fine_t0`

@@ -1,12 +1,13 @@
 """Multisensor analysis across Sentinel-1, Sentinel-2 and Sentinel-3."""
 
-from .catalog import ProductRef, select_product_refs
+from .catalog import ProductRef, filter_overpass, local_solar_hour, select_product_refs
 from .cache import AssetCache
 from .atmosphere import ColumnToSurfaceConfig, column_to_surface_estimate
 from .cities import CitySpec, get_city, list_cities
 from .config import AOI, ClientConfig
 from .cube import AnalysisGrid, CubeValidationError, GridSpec, projected_bounds, tag_cube, utm_crs, validate_cube, validate_observation_set
-from .downscale import (CoarseConsistentDownscaler, ConformalDownscaler, ensemble_spread, fit_conformal_downscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
+from .zones import DEFAULT_ZONAL_STATISTICS, ZONAL_STATISTICS, ZoneSet, aoi_mask, clip_to_aoi, zonal_statistics
+from .downscale import (CoarseConsistentDownscaler, DownscaleSpec, LocalWindowDownscaler, downscale_per_scene, fit_local_window_downscaler, ConformalDownscaler, ensemble_spread, fit_conformal_downscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
                         SklearnDownscaler, XGBoostDownscaler, fit_sklearn_downscaler, fit_coarse_consistent_gwr_downscaler,
                         fit_coarse_consistent_linear_downscaler, fit_coarse_consistent_random_forest_downscaler,
                         fit_coarse_consistent_tsharp_downscaler, fit_coarse_consistent_xgboost_downscaler,
@@ -74,15 +75,43 @@ from .sensors.sentinel3 import (
     statistics,
     to_celsius,
 )
-from .storage import open_zarr, read_cog, validate_cog, write_cog, write_zarr
+from .storage import netcdf_safe, open_zarr, read_cog, validate_cog, write_cog, write_netcdf, write_zarr
 from .stac import STACCatalog, STACItem
 from .metadata import apply_variable_contract, ensure_compatible_units, validate_variable_contract
 from .reference import collocate_stations
 from .providers import AUXILIARY_PROVIDERS, AuxiliaryArtifact, AuxiliarySpec, CAMSConfig, CAMSProvider, ERA5Config, ERA5Provider, OpenAQConfig, OpenAQInterpolationConfig, OpenAQProvider
 from .validation import blocked_calibration_split, blocked_spatiotemporal_split, compare_to_reference, validate_independent_reference
-from .workflow import AnalysisRequest, AnalysisResult, AnalysisWorkflow, TemporalPair, select_temporal_pair
+from .workflow import (AnalysisRequest, AnalysisResult, AnalysisWorkflow, ProductAcquisitionError, RequestEstimate, RequestLimits,
+                       RequestTooLargeError, TemporalPair, check_request, estimate_request, select_temporal_pair)
+
+from .credentials import CredentialCheck, check_credentials
+from .version import __version__, build_info
 
 __all__ = [
+    "netcdf_safe",
+    "write_netcdf",
+    "__version__",
+    "build_info",
+    "CredentialCheck",
+    "check_credentials",
+    "DownscaleSpec",
+    "LocalWindowDownscaler",
+    "ZoneSet",
+    "ZONAL_STATISTICS",
+    "DEFAULT_ZONAL_STATISTICS",
+    "aoi_mask",
+    "clip_to_aoi",
+    "zonal_statistics",
+    "downscale_per_scene",
+    "fit_local_window_downscaler",
+    "filter_overpass",
+    "local_solar_hour",
+    "ProductAcquisitionError",
+    "RequestEstimate",
+    "RequestLimits",
+    "RequestTooLargeError",
+    "check_request",
+    "estimate_request",
     "ConformalDownscaler",
     "ensemble_spread",
     "fit_conformal_downscaler",

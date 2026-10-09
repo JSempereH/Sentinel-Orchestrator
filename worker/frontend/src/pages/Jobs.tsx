@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { jobsApi, type JobStatus, type JobSummary } from "../api/client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AxiosError } from "axios";
+import { ACTIVE_STATUSES, jobsApi, type JobMetrics, type JobStatus, type JobSummary } from "../api/client";
 
 const RUNNING_POLL_MS = 5_000;
 const IDLE_POLL_MS = false as const;
@@ -17,7 +18,7 @@ export function JobsPage({ focusJobId }: { focusJobId?: string | null }) {
     queryFn: jobsApi.list,
     refetchInterval: (query) => {
       const rows = query.state.data ?? [];
-      const anyActive = rows.some((j) => j.status === "PENDING" || j.status === "RUNNING");
+      const anyActive = rows.some((j) => ACTIVE_STATUSES.includes(j.status));
       return anyActive ? RUNNING_POLL_MS : IDLE_POLL_MS;
     },
   });
@@ -66,13 +67,38 @@ export function JobsPage({ focusJobId }: { focusJobId?: string | null }) {
   );
 }
 
+function formatMetrics(metrics: JobMetrics): string | null {
+  const parts: string[] = [];
+  if (metrics.duration_s !== undefined) parts.push(`${Math.round(metrics.duration_s / 60)} min`);
+  if (metrics.peak_rss_mb !== undefined) parts.push(`peak RAM ${(metrics.peak_rss_mb / 1024).toFixed(1)} GB`);
+  if (metrics.failed_products) parts.push(`${metrics.failed_products} product(s) skipped after failing`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+function errorText(error: unknown): string {
+  return String((error as AxiosError<{ detail?: string }>)?.response?.data?.detail ?? error);
+}
+
 function JobRow({ job, expanded, onToggle }: { job: JobSummary; expanded: boolean; onToggle: () => void }) {
+  const queryClient = useQueryClient();
+  const [showLog, setShowLog] = useState(false);
+  const active = ACTIVE_STATUSES.includes(job.status);
   const detailQuery = useQuery({
     queryKey: ["job", job.job_id],
     queryFn: () => jobsApi.get(job.job_id),
     enabled: expanded,
-    refetchInterval: expanded && (job.status === "PENDING" || job.status === "RUNNING") ? RUNNING_POLL_MS : IDLE_POLL_MS,
+    refetchInterval: expanded && active ? RUNNING_POLL_MS : IDLE_POLL_MS,
   });
+  const logQuery = useQuery({
+    queryKey: ["job-log", job.job_id],
+    queryFn: () => jobsApi.log(job.job_id),
+    enabled: expanded && showLog,
+    refetchInterval: expanded && showLog && active ? RUNNING_POLL_MS : IDLE_POLL_MS,
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["jobs"] });
+  const cancelMut = useMutation({ mutationFn: () => jobsApi.cancel(job.job_id), onSuccess: refresh });
+  const deleteMut = useMutation({ mutationFn: () => jobsApi.remove(job.job_id), onSuccess: refresh });
+  const metrics = formatMetrics(job.metrics ?? {});
 
   return (
     <>
@@ -96,6 +122,7 @@ function JobRow({ job, expanded, onToggle }: { job: JobSummary; expanded: boolea
                 {detailQuery.data.error_message && (
                   <div style={{ fontSize: 12, color: "var(--danger)" }}>{detailQuery.data.error_message}</div>
                 )}
+                {metrics && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{metrics}</div>}
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4 }}>
                     REQUEST
@@ -104,14 +131,48 @@ function JobRow({ job, expanded, onToggle }: { job: JobSummary; expanded: boolea
                     {JSON.stringify(detailQuery.data.request_params, null, 2)}
                   </pre>
                 </div>
-                {job.status === "SUCCEEDED" && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {job.status === "SUCCEEDED" && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={(e) => { e.stopPropagation(); jobsApi.download(job.job_id); }}
+                    >
+                      ⬇ Download result
+                    </button>
+                  )}
                   <button
                     className="btn btn-secondary btn-sm"
-                    style={{ width: "fit-content" }}
-                    onClick={(e) => { e.stopPropagation(); jobsApi.download(job.job_id); }}
+                    onClick={(e) => { e.stopPropagation(); setShowLog(!showLog); }}
                   >
-                    ⬇ Download result
+                    {showLog ? "Hide log" : "Show log"}
                   </button>
+                  {active && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      disabled={cancelMut.isPending}
+                      onClick={(e) => { e.stopPropagation(); if (confirm("Cancel this job?")) cancelMut.mutate(); }}
+                    >
+                      Cancel job
+                    </button>
+                  )}
+                  {!active && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ color: "var(--danger)" }}
+                      disabled={deleteMut.isPending}
+                      onClick={(e) => { e.stopPropagation(); if (confirm("Delete this job and all its files?")) deleteMut.mutate(); }}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+                {(cancelMut.isError || deleteMut.isError) && (
+                  <div style={{ fontSize: 12, color: "var(--danger)" }}>{errorText(cancelMut.error ?? deleteMut.error)}</div>
+                )}
+                {showLog && (
+                  <pre style={{ margin: 0, fontSize: 11, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap", background: "#fff", border: "1px solid var(--border)", borderRadius: 6, padding: 8 }}>
+                    {logQuery.isLoading ? "Loading…" : logQuery.data || "(no log yet)"}
+                  </pre>
                 )}
               </div>
             )}

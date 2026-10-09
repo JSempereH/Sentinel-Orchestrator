@@ -156,7 +156,7 @@ def fetch(city_id: str, start: str, end: str):
     log("fused cube ready")
     global _TERRAIN
     _TERRAIN = result.terrain
-    return result.cube.sortby("time"), result.predictor_cube
+    return result.cube.sortby("time"), result.predictors.get("sentinel2")
 
 
 def fine_predictors_at(cube: xr.Dataset, predictor_cube: xr.Dataset, index: int) -> xr.Dataset | None:

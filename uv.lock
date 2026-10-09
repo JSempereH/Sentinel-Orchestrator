@@ -4067,7 +4067,7 @@ wheels = [
 
 [[package]]
 name = "sentinel-analysis"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "affine" },
@@ -4077,6 +4077,7 @@ dependencies = [
     { name = "pyproj" },
     { name = "python-dotenv" },
     { name = "requests" },
+    { name = "shapely" },
     { name = "xarray" },
 ]
 
@@ -4178,6 +4179,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
     { name = "s1ard", marker = "extra == 's1ard'", specifier = ">=2.12.0" },
     { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.6.0" },
+    { name = "shapely", specifier = ">=2.0.0" },
     { name = "shapely", marker = "extra == 'geo'", specifier = ">=2.0.0" },
     { name = "xarray", specifier = ">=2025.1.0" },
     { name = "xgboost", marker = "extra == 'ml'", specifier = ">=2.1.0" },

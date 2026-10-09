@@ -139,3 +139,31 @@ def test_jobs_beyond_the_concurrency_limit_wait_as_pending(client, auth_headers,
             break
         time.sleep(0.05)
     assert running == [first, second]
+
+
+def test_submit_rejects_a_request_beyond_the_worker_limits(client, auth_headers, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "max_aoi_km2", 100)
+    oversized = {**_fake_request_dict(), "aoi": {"west": 13.0, "south": 52.0, "east": 14.0, "north": 53.0}}
+
+    response = client.post("/jobs", json=oversized, headers=auth_headers)
+
+    assert response.status_code == 422
+    assert "AOI is" in response.json()["detail"]
+
+
+def test_build_request_passes_overpass_error_policy_and_downscaling():
+    from app.runner import build_request
+
+    request = build_request({
+        **_fake_request_dict(),
+        "sensors": ["sentinel3", "sentinel2"],
+        "thermal_overpass": "day",
+        "on_product_error": "raise",
+        "downscale": {"model": "linear"},
+    })
+
+    assert request.thermal_overpass == "day"
+    assert request.on_product_error == "raise"
+    assert request.downscale is not None and request.downscale.model == "linear"

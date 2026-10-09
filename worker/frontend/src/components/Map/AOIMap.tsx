@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 type Coord = [number, number];
@@ -98,7 +98,7 @@ export function AOIMap({ onGeometryChange, initialGeometry, height = 520 }: AOIM
     });
 
     // Single click listener: reads current state via refs to avoid stale closures
-    map.on("click", (e) => {
+    map.on("click", (e: maplibregl.MapMouseEvent) => {
       if (!drawingRef.current) return;
       const coord: Coord = [e.lngLat.lng, e.lngLat.lat];
       setVertices((prev) => {
