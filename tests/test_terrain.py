@@ -104,5 +104,5 @@ def test_workflow_run_adds_aggregated_terrain_and_illumination_predictors():
 
     np.testing.assert_allclose(result.cube["elevation"].isel(time=0).values, [[100.0, 300.0], [100.0, 300.0]])
     assert result.cube["cos_incidence"].dims == ("time", "y", "x") and np.isfinite(result.cube["cos_incidence"].values).all()
-    assert result.predictor_cube["elevation"].sizes["time"] == 2
+    assert "elevation" not in result.predictors["sentinel2"]  # static terrain is not copied per time
     assert result.terrain is terrain

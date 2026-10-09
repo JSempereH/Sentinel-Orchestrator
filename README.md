@@ -4,16 +4,22 @@
 [![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 
-Python library for analyzing an area of interest with Sentinel-1, Sentinel-2,
-Sentinel-3 LST, Sentinel-5P, Landsat 8/9, ECOSTRESS, and auxiliary
-meteorological and air-quality sources - discovery, download, and fusion into
-one analysis-ready cube, plus a coarse-to-fine thermal downscaling toolkit
-(OLS/TsHARP, Random Forest, XGBoost, GWR, STARFM/ESTARFM) and an optional
-`worker/` HTTP service to run it all as a job.
+`sentinel_analysis` turns an area of interest and a date range into
+analysis-ready, co-registered cubes: it discovers, downloads and harmonizes
+Sentinel-1/2/3/5P, Landsat 8/9, ECOSTRESS, ERA5, CAMS, OpenAQ and terrain
+data onto shared UTM grids, keeping provenance, units and quality masks
+explicit. Its focus is urban land-surface temperature: Sentinel-3 LST is the
+coarse target, Sentinel-2 indices and terrain are fine-scale predictors, and
+Landsat/ECOSTRESS act as independent thermal references. A downscaling
+stage sharpens LST from 1 km to ~100 m (per-scene OLS, Random Forest or
+XGBoost anchored to the observed scene; GWR, STARFM/ESTARFM and conformal
+intervals as building blocks), validated with blocked spatiotemporal
+holdouts. It runs as a library, a CLI, or a self-hosted single-user HTTP
+worker (`worker/`).
 
-Known gaps and what's validated on real data versus synthetic-only are
-tracked honestly in [`docs/roadmap.md`](docs/roadmap.md) - worth reading
-before relying on any one model's numbers.
+Current limitations and what is validated on real data versus
+synthetic-only are listed in [`docs/roadmap.md`](docs/roadmap.md) - worth
+reading before relying on any one model's numbers.
 
 ---
 
@@ -80,18 +86,26 @@ src/sentinel_analysis/
 
 Sentinel-1 has four interchangeable `sentinel1_backend` options -
 `"snap"` (default, local SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud
-processing, no SNAP needed), `"pc_rtc"` (Planetary Computer's pre-processed
-RTC COGs, read in place - not yet validated on a real scene), and `"s1ard"`
-(pyroSAR NRB, currently broken - see `docs/roadmap.md`). Sentinel-2 can
-likewise be read in place from STAC COGs with `sentinel2_source="stac_cog"`
-instead of downloading full SAFE archives (also pending real-scene
-validation). Each sensor's search/acquisition lives in one adapter in
+processing, no SNAP needed; not yet run against a real submission),
+`"pc_rtc"` (Planetary Computer's pre-processed RTC COGs, read in place),
+and `"s1ard"` (pyroSAR NRB, currently broken - see `docs/roadmap.md`).
+Sentinel-2 can likewise be read in place from STAC COGs with
+`sentinel2_source="stac_cog"` instead of downloading full SAFE archives.
+Both cloud-native options are validated against real scenes. Each sensor's search/acquisition lives in one adapter in
 `workflow/adapters.py`. Landsat/ECOSTRESS are independent thermal
 references used as validation/predictors alongside Sentinel-3's own `lst`.
 `downscale/`'s models turn a coarse thermal field into a fine-resolution
 one using Sentinel-2 predictors - see
 [`docs/downscaling.md`](docs/downscaling.md) for what's validated on real
 data versus synthetic-only.
+
+A request can also keep only daytime thermal passes
+(`thermal_overpass="day"`), downscale every scene as a final workflow stage
+(`downscale=DownscaleSpec(...)`), and skip individual products that fail to
+download or read (`on_product_error="skip"`, the default; failures are
+listed in the result's provenance). `execute()` estimates the in-memory
+size of a request and rejects one that is too large before downloading
+anything. See [`docs/workflows.md`](docs/workflows.md).
 
 `sentinel_analysis` is the only current package name. `Sentinel3LST` is the
 local Sentinel-3 facade, while `Sentinel3LSTClient` is the remote openEO

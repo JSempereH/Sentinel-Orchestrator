@@ -50,9 +50,7 @@ class ProductQuery:
     online_only: bool = True
 
     def normalized_aoi(self) -> AOI:
-        return self.aoi if isinstance(self.aoi, AOI) else AOI(
-            **{key: float(self.aoi[key]) for key in ("west", "south", "east", "north")}
-        )
+        return self.aoi if isinstance(self.aoi, AOI) else AOI.from_dict(self.aoi)
 
     def normalized_dates(self) -> tuple[str, str]:
         start = _iso_datetime(self.start)

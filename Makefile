@@ -7,7 +7,7 @@ DOCS_PORT    ?= 8001
 .PHONY: help install install-worker \
         worker docs docs-build \
         test test-worker test-all \
-        lint docker-build docker-up docker-down clean
+        lint lock-worker check-credentials canary docker-build docker-up docker-down clean
 
 help: ## Show this help
 	@echo "Available targets:"
@@ -28,7 +28,7 @@ install-worker: ## Create/refresh the sentinel-worker venv and install its deps
 	@# the latest PyPI release and the build fails with a version mismatch.
 	@command -v gdal-config >/dev/null || { echo "error: gdal-config not found. Install libgdal-dev (see worker/README.md)."; exit 1; }
 	@echo "gdal==$$(gdal-config --version).*" > $(WORKER_DIR)/.venv/gdal-constraint.txt
-	uv pip install --python $(WORKER_DIR)/.venv -e ".[cdse,auxiliary,optical,sar,s1ard,hyp3,cloud]" --constraint $(WORKER_DIR)/.venv/gdal-constraint.txt
+	uv pip install --python $(WORKER_DIR)/.venv -e ".[cdse,auxiliary,optical,sar,s1ard,hyp3,cloud,landsat,ecostress,ml]" --constraint $(WORKER_DIR)/.venv/gdal-constraint.txt
 	@# `gdal` built above under uv's normal (isolated) build environment does
 	@# not see this venv's numpy, so it silently produces a binding with no
 	@# `osgeo._gdal_array` extension (pyroSAR/s1ard need it). Rebuild it
@@ -42,7 +42,7 @@ install-worker: ## Create/refresh the sentinel-worker venv and install its deps
 ## --- Run ---------------------------------------------------------------------
 
 worker: ## Run the sentinel-worker FastAPI service (:8100)
-	cd $(WORKER_DIR) && .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port $(WORKER_PORT)
+	cd $(WORKER_DIR) && .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port $(WORKER_PORT) --timeout-keep-alive 30
 
 docs: ## Serve the sentinel_analysis docs locally with mkdocs (:8001)
 	uv run --extra docs mkdocs serve --dev-addr 127.0.0.1:$(DOCS_PORT)
@@ -67,14 +67,25 @@ lint: ## Run ruff on this repo
 
 ## --- Docker (alternative to bare venvs; see docker-compose.yml) ------------
 
-docker-build: ## Build the sentinel-worker container image
-	docker compose build
+docker-build: ## Build the sentinel-worker container image (records the current commit)
+	GIT_COMMIT=$$(git rev-parse HEAD) docker compose build
 
 docker-up: ## Run the sentinel-worker in a container (:8100)
 	docker compose up
 
 docker-down: ## Stop and remove the container started by docker-up
 	docker compose down
+
+## --- Operations ------------------------------------------------------------
+
+lock-worker: ## Re-pin every worker/container dependency into worker/requirements.lock
+	uv pip compile pyproject.toml $(WORKER_DIR)/requirements.txt --extra cdse --extra auxiliary --extra optical --extra sar --extra cloud --extra hyp3 --extra landsat --extra ecostress --extra ml --python-version 3.12 --python-platform x86_64-unknown-linux-gnu -o $(WORKER_DIR)/requirements.lock
+
+check-credentials: ## Authenticate against every configured data provider (exit 1 on failure)
+	uv run sentinel-analysis check-credentials
+
+canary: ## Smallest real end-to-end run (see scripts/canary.py); add ARGS=--full for Sentinel-2 + downscaling
+	uv run --extra cdse --extra optical --extra cloud --extra landsat --extra ml python scripts/canary.py $(ARGS)
 
 ## --- Housekeeping ----------------------------------------------------------
 

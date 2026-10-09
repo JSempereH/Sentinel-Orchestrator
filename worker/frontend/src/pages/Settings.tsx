@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { workerApi, type UsageSnapshot } from "../api/client";
+import { workerApi, type Readiness, type ReadinessCheck } from "../api/client";
+
+const STATUS_COLOR: Record<ReadinessCheck["status"], string> = {
+  ok: "var(--success)",
+  warning: "var(--warning)",
+  error: "var(--danger)",
+  not_configured: "var(--text-faint)",
+};
 
 type TestState = "idle" | "testing" | "ok" | "error";
 
@@ -10,7 +17,8 @@ export function SettingsPage() {
 
   const [testState, setTestState] = useState<TestState>("idle");
   const [testError, setTestError] = useState<string | null>(null);
-  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
+  const [ready, setReady] = useState<Readiness | null>(null);
+  const [build, setBuild] = useState<string | null>(null);
 
   function handleSave() {
     if (workerUrl.trim()) localStorage.setItem("worker_url", workerUrl.trim());
@@ -24,11 +32,12 @@ export function SettingsPage() {
   async function handleTest() {
     setTestState("testing");
     setTestError(null);
-    setUsage(null);
+    setReady(null);
     try {
-      await workerApi.health();
-      const snapshot = await workerApi.usage();
-      setUsage(snapshot);
+      const health = await workerApi.health();
+      setBuild(`${health.version}${health.git_commit ? ` (${health.git_commit.slice(0, 8)})` : ""}`);
+      // Authenticates against every data provider: takes a few seconds.
+      setReady(await workerApi.ready(true));
       setTestState("ok");
     } catch (err) {
       setTestError(err instanceof Error ? err.message : "Could not reach the worker");
@@ -101,27 +110,26 @@ export function SettingsPage() {
           {testState === "error" && (
             <div style={{ fontSize: 13, color: "var(--danger)" }}>{testError}</div>
           )}
-          {testState === "ok" && usage && (
+          {testState === "ok" && ready && (
             <div>
-              <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 500, marginBottom: 8 }}>
-                ✓ Reached the worker
+              <div style={{ fontSize: 13, color: STATUS_COLOR[ready.status], fontWeight: 500, marginBottom: 8 }}>
+                {ready.status === "ok" ? "✓ Worker ready" : ready.status === "warning" ? "Worker ready, with warnings" : "Worker not ready"}
+                {build && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> · version {build}</span>}
               </div>
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Provider</th>
+                    <th>Check</th>
+                    <th>Status</th>
                     <th>Detail</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(usage).map(([provider, info]) => (
-                    <tr key={provider}>
-                      <td style={{ fontWeight: 500, verticalAlign: "top" }}>{provider}</td>
-                      <td>
-                        <pre style={{ margin: 0, fontSize: 11, whiteSpace: "pre-wrap", color: "var(--text-muted)" }}>
-                          {JSON.stringify(info, null, 2)}
-                        </pre>
-                      </td>
+                  {Object.entries(ready.checks).map(([name, check]) => (
+                    <tr key={name}>
+                      <td style={{ fontWeight: 500 }}>{name.replace("credentials.", "")}</td>
+                      <td style={{ color: STATUS_COLOR[check.status], fontWeight: 500 }}>{check.status.replace("_", " ")}</td>
+                      <td style={{ fontSize: 12, color: "var(--text-muted)" }}>{check.detail}</td>
                     </tr>
                   ))}
                 </tbody>

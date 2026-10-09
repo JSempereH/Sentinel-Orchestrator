@@ -24,10 +24,9 @@ as modeled.
 - Sentinel-3: `Sentinel3LST` for local processing and `Sentinel3LSTClient` for openEO.
 - Sentinel-1: four `sentinel1_backend` options - `"snap"` (default, local
   SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud RTC, no SNAP needed), `"pc_rtc"`
-  (Planetary Computer RTC COGs read in place, pending real-scene
-  validation), `"s1ard"` (pyroSAR NRB, currently broken - see `roadmap.md`).
+  (Planetary Computer RTC COGs read in place), `"s1ard"` (pyroSAR NRB, currently broken - see `roadmap.md`).
 - Sentinel-2: full SAFE downloads from CDSE (default) or
-  `sentinel2_source="stac_cog"` windowed COG reads (pending real-scene validation).
+  `sentinel2_source="stac_cog"` windowed COG reads.
 - Independent thermal references: Landsat 8/9 (`sensors/landsat.py`) and
   ECOSTRESS (`sensors/ecostress.py`), alongside Sentinel-3's own `lst`.
 - Downscaling/fusion (`downscale/`): OLS/TsHARP, Random Forest, XGBoost,

@@ -60,40 +60,112 @@ npm run build                                       # writes worker/frontend/dis
 `node:20-slim` build stage in `worker/Dockerfile` - the final image needs no
 Node.js at all.
 
-## Production hardening (single-user / LAN deployment)
+## Production operation (single-user / LAN deployment)
 
 This is self-hosted, single-trusted-user tooling, so "production" here means
-*durable and observable*, not multi-tenant:
+*reliable, recoverable and observable*, not multi-tenant: one shared bearer
+token, no TLS of its own, SQLite job store. Keep it on a LAN or VPN, or put
+a TLS reverse proxy in front before exposing it anywhere else.
 
-- **CI**: `.github/workflows/ci.yml` lints and tests `sentinel_analysis` and
-  `worker` on every push/PR.
-- **Lint**: `ruff` (`select = ["E", "F", "B"]`) in `pyproject.toml`, `eslint`
-  for the frontend. All clean as of this change.
-- **Containers**: `worker/Dockerfile` (multi-stage: a `node:20-slim` stage
-  builds the frontend, the final Python stage copies in the static `dist/` -
-  no Node.js in the shipped image), run via `docker-compose.yml`
-  (`make docker-up`). The image excludes `s1ard` (confirmed broken against
-  a real scene, see `docs/roadmap.md`) and SNAP itself (a large Java
-  desktop app this Dockerfile does not bundle), so `sentinel1_backend`
-  defaults to `"snap"` but that backend is only usable from a separate
-  image with SNAP's `gpt` on `PATH`; the lightweight `hyp3` extra *is*
-  installed, so `sentinel1_backend="hyp3_rtc"` works out of the box (needs
-  Earthdata credentials, see `docs/setup.md`). `cloud` (zarr/dask) *is*
-  installed too - `execute_and_persist()` always calls `write_zarr()`, so
-  without it every job fails at the last step regardless of sensor. This
-  was caught by a real end-to-end container run, not just inferred from
-  the code - see `docs/roadmap.md`.
-- **Worker job durability**: job status is cached in memory and mirrored to
-  `<WORKER_OUTPUT_DIR>/jobs.db` (SQLite); a restart marks any job still
-  `PENDING`/`RUNNING` as `FAILED` with an explanatory message instead of
-  losing it.
-- **Worker concurrency**: at most `MAX_CONCURRENT_JOBS` (default 1) jobs
-  run at once; the rest wait as `PENDING`. A single Sentinel-1 SNAP job
-  peaked at ~11 GB of RAM, so raise this only on a machine sized for it.
-- **Worker `/usage`**: `sentinel_analysis`'s own providers (CDSE, CDS/ADS,
-  OpenAQ) have no numeric credit balance the way a paid processing service
-  might; `GET /usage` reports what each actually exposes (OpenAQ's real
-  rate-limit headers; credential presence only for CDSE/CDS-ADS).
-- **Git hygiene**: `worker/runs/` is in this repo's `.gitignore` - it's the
-  worker's job-output directory (regenerable by re-running a job), not
-  source.
+### Deploying
+
+```bash
+cp worker/.env.example worker/.env   # WORKER_API_TOKEN + provider credentials
+make docker-build                    # records the current git commit in the image
+docker compose up -d
+curl -s localhost:8100/health        # liveness: version and commit
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8100/health/ready
+```
+
+The container runs as an unprivileged user (uid 1000), restarts unless
+stopped, reaps the job processes it spawns (`init: true`), and is capped at
+`WORKER_MEM_LIMIT` (default `12g`) so a runaway job is killed inside the
+container instead of freezing the host. A named volume created by an older,
+root-running image must be handed over once:
+`docker compose run --rm --user root worker chown -R 1000:1000 /data`.
+Every Python dependency comes from `worker/requirements.lock`; re-pin with
+`make lock-worker` and commit the result when upgrading. CI installs from
+the same lock, so a lock that no longer resolves fails there first.
+
+SNAP is not in the image (`sentinel1_backend="snap"` needs a separate image
+with `gpt` on `PATH`); `hyp3_rtc` and `pc_rtc` need nothing extra. `s1ard`
+is excluded because it is broken (see `roadmap.md`).
+
+### Jobs
+
+- **Isolation**: each job runs in its own child process and process group
+  (`JOB_PROCESS_ISOLATION`, on by default). An out-of-memory kill or crash
+  fails that job with an explanatory message and leaves the API running;
+  the child also dies with the worker instead of running orphaned.
+- **Concurrency**: at most `MAX_CONCURRENT_JOBS` (default 1) jobs run at
+  once; the rest wait as `PENDING`. One Sentinel-1 SNAP job peaked at
+  ~11 GB of RAM, so raise this only on a machine sized for it.
+- **Cancellation and timeouts**: `POST /jobs/{id}/cancel` (or "Cancel job"
+  in the UI) stops a pending job at once and a running one within about a
+  second, including anything it started (SNAP's `gpt`). A job still running
+  after `JOB_TIMEOUT_HOURS` (default 12) is stopped and marked `FAILED`.
+- **Size limits**: requests beyond `MAX_AOI_KM2`, `MAX_PRODUCTS_PER_SENSOR`
+  or `MAX_ESTIMATED_GB` are rejected at submission with HTTP 422.
+- **Durability**: job state is mirrored to `<WORKER_OUTPUT_DIR>/jobs.db`;
+  a restart marks jobs that were `PENDING`/`RUNNING` as `FAILED` instead of
+  losing them. Runs cannot resume mid-way.
+
+### Disk
+
+- A successful job keeps only `result/` and `job.log`; its downloads and
+  AOI subsets (`work/`) are deleted (`KEEP_WORK_DIR=true` keeps them).
+  Failed jobs keep `work/` for diagnosis.
+- Finished jobs older than `JOB_RETENTION_DAYS` (default 30) are deleted
+  with all their files, at startup and hourly. `DELETE /jobs/{id}` (or
+  "Delete" in the UI) removes one at once.
+- Below `MIN_FREE_DISK_GB` (default 20) free in the output directory, new
+  submissions get HTTP 507 and queued jobs fail instead of starting.
+
+### Monitoring
+
+- `GET /health` (no auth): liveness, version and git commit; the
+  container's `HEALTHCHECK`.
+- `GET /health/ready` (auth): free disk, the job database, and a live
+  authentication against every configured provider (CDSE OAuth client and
+  account, Earthdata with its token expiry, CDS, ADS, OpenAQ). HTTP 503 when
+  any check fails; credentials expiring within 7 days are a `warning`.
+  Cached for 10 minutes (`?refresh=true` forces a new check). The UI's
+  Settings page shows the same report.
+- `GET /jobs/{id}` reports `started_at`, `finished_at` and `metrics`
+  (`duration_s`, `peak_rss_mb` - the larger of the job and any external
+  tool it ran - and `failed_products`); `GET /jobs/{id}/log` returns the job's own log.
+- `LOG_FORMAT=json` switches the worker's logs to one JSON object per line
+  for a log collector; job processes tag every line with the job id.
+- **Daily canary**: `make canary` (or `scripts/canary.py` from cron or a
+  systemd timer) checks every credential and runs the smallest real
+  Sentinel-3 analysis, exiting non-zero on failure so the scheduler can
+  alert; `ARGS=--full` adds Sentinel-2 COGs and downscaling. Results are
+  appended to `output/canary/history.jsonl`. `make check-credentials` runs
+  only the credential part.
+- Every result's `provenance.json` records the `sentinel_analysis` version
+  and git commit (`software`) that produced it.
+
+### Security notes
+
+- Keep `.env` and `worker/.env` readable by your user only (`chmod 600`): they hold every
+  provider credential.
+- The UI stores the worker token in the browser's `localStorage`; anything able to run
+  script in that origin could read it. The UI renders no server or user HTML, and the map
+  library is kept on a version without known advisories.
+- `npm audit` still reports `vite`/`esbuild` advisories that affect only the development
+  server (`npm run dev`), not the built UI the worker serves. Fixing them needs Vite 8,
+  which needs Node.js 20.19 or newer for local frontend development.
+- Requests run as the token holder: parameters such as `downscale.model_options` are passed
+  to the models as given, so the token must only go to trusted users.
+
+### Quality gates
+
+- **CI** (`.github/workflows/ci.yml`): ruff, mypy, the `sentinel_analysis`
+  tests and package build; the worker tests installed from
+  `requirements.lock`; and the frontend's `npm ci`, eslint and build
+  (which type-checks with `tsc`).
+- Live-data checks (`scripts/validate_*`, the benchmarks, the canary) are
+  run by hand or on a schedule, not in CI, since they need credentials and
+  download real data.
+- **Git hygiene**: `worker/runs/` is in `.gitignore` - it's the worker's
+  job-output directory (regenerable by re-running a job), not source.

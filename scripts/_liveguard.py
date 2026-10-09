@@ -4,7 +4,7 @@ fetches (SNAP/xarray/dask over real Sentinel/Landsat data).
 This machine has frozen twice running two such scripts concurrently, each
 consuming several GB with no OOM-kill logged in dmesg/journalctl - the
 desktop session restarting immediately after was the only signal (see
-docs/roadmap.md, "This machine froze twice"). `acquire()` refuses to start a
+docs/history.md, "This machine froze twice"). `acquire()` refuses to start a
 second live-data script instead of repeating that, rather than relying on
 whoever is running these to remember the rule.
 """
@@ -48,7 +48,7 @@ def acquire(script_name: str) -> None:
             print(
                 f"error: {holder_name} (pid {holder_pid}) is already running a live-data "
                 f"script. Running two of these at once has frozen this machine before "
-                f"(see docs/roadmap.md, \"This machine froze twice\") - wait for it to "
+                f"(see docs/history.md, \"This machine froze twice\") - wait for it to "
                 f"finish before starting {script_name}.",
                 file=sys.stderr,
             )

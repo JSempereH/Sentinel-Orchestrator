@@ -26,6 +26,8 @@ export interface AOI {
   south: number;
   east: number;
   north: number;
+  /** The drawn polygon when it is not just its bounding box; results are masked to it. */
+  geometry?: GeoJSON.Polygon;
 }
 
 export interface AuxiliarySpec {
@@ -45,9 +47,29 @@ export interface JobRequest {
   max_products_per_sensor?: number;
   s2_cloud_cover_max?: number;
   auxiliary?: AuxiliarySpec[];
+  thermal_overpass?: "any" | "day" | "night";
+  terrain_predictors?: boolean;
+  on_product_error?: "skip" | "raise";
+  downscale?: DownscaleSpec | null;
 }
 
-export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+// Mirrors sentinel_analysis.downscale.DownscaleSpec.
+export interface DownscaleSpec {
+  model?: "linear" | "random_forest" | "xgboost" | "local_trees";
+  predictors?: string[];
+  coarse_consistent?: boolean;
+  min_samples?: number;
+}
+
+export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export const ACTIVE_STATUSES: JobStatus[] = ["PENDING", "RUNNING"];
+
+export interface JobMetrics {
+  duration_s?: number;
+  peak_rss_mb?: number;
+  failed_products?: number | null;
+}
 
 export interface JobProgress {
   sensor: string;
@@ -62,6 +84,9 @@ export interface JobSummary {
   progress: JobProgress | null;
   error_message: string | null;
   created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  metrics: JobMetrics;
 }
 
 export interface JobDetail extends JobSummary {
@@ -75,8 +100,25 @@ export type UsageSnapshot = Record<string, Record<string, unknown>>;
 
 // ── API calls ──────────────────────────────────────────────────────────────
 
+export interface ReadinessCheck {
+  status: "ok" | "warning" | "error" | "not_configured";
+  detail: string;
+  expires_at?: string | null;
+}
+
+export interface Readiness {
+  status: "ok" | "warning" | "error";
+  checked_at: string;
+  checks: Record<string, ReadinessCheck>;
+}
+
 export const workerApi = {
-  health: () => api.get<{ status: string; version: string }>("/health").then((r) => r.data),
+  health: () => api.get<{ status: string; version: string; git_commit: string | null }>("/health").then((r) => r.data),
+  // 503 still carries the full report - surface it instead of throwing.
+  ready: (refresh = false) =>
+    api
+      .get<Readiness>("/health/ready", { params: refresh ? { refresh: true } : undefined, validateStatus: (s) => s === 200 || s === 503 })
+      .then((r) => r.data),
   usage: () => api.get<UsageSnapshot>("/usage").then((r) => r.data),
 };
 
@@ -87,6 +129,9 @@ export const jobsApi = {
       .then((r) => r.data),
   list: () => api.get<JobSummary[]>("/jobs").then((r) => r.data),
   get: (jobId: string) => api.get<JobDetail>(`/jobs/${jobId}`).then((r) => r.data),
+  cancel: (jobId: string) => api.post(`/jobs/${jobId}/cancel`).then((r) => r.data),
+  remove: (jobId: string) => api.delete(`/jobs/${jobId}`).then((r) => r.data),
+  log: (jobId: string) => api.get<string>(`/jobs/${jobId}/log`, { responseType: "text" }).then((r) => r.data),
   // The result endpoint requires the bearer token, which a plain <a href>
   // navigation cannot send - fetch it as a blob (picking up the same
   // interceptor-attached header) and hand the browser a local object URL.

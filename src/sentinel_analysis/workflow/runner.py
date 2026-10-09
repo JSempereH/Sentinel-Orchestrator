@@ -2,27 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 from threading import Lock
 
 import xarray as xr
 
 from ..cube import validate_cube
-from ..catalog import select_product_refs
+from ..catalog import annotate_aoi_coverage, filter_overpass, select_product_refs
 from ..cache import AssetCache
 from ..config import ClientConfig
 from ..download import CDSEDownloader
+from ..version import build_info
+from ..downscale.per_scene import downscale_per_scene
 from ..fusion import TemporalMatch, align_features, fusion_quality
 from ..metadata import ensure_compatible_units, validate_variable_contract
 from ..sensors.sentinel3.georeference import grid_l2_lst
+from ..zones import aoi_mask
 from ..sensors.sentinel5p import grid_s5p
 from ..harmonization.spatial import harmonize_spatial
 from ..sensors.terrain import terrain_predictors, terrain_static
 from ..providers import AUXILIARY_PROVIDER_FACTORIES, AuxiliarySpec, OpenAQInterpolationConfig, OpenAQProvider
 from .adapters import SENSOR_ADAPTERS, AcquisitionContext, combine_sentinel3, mosaic_temporal_tiles, to_grid
+from .limits import DEFAULT_REQUEST_LIMITS, RequestLimits, check_request
 from .plan import WorkflowPlan, build_plan
-from .request import AnalysisRequest
+from .request import OVERPASS_SENSORS, AnalysisRequest
 from .result import AnalysisResult
 
 # Catalogue searches return results in date order, but products are ranked
@@ -30,10 +35,14 @@ from .result import AnalysisResult
 # `max_products_per_sensor` items would keep the *earliest* N rather than
 # the *best* N, so discovery scans up to this many candidates first.
 DISCOVERY_SCAN_LIMIT = 1000
+# Candidates per requested product handed to the Sentinel-3 cloud probe.
+PROBE_CANDIDATE_FACTOR = 3
 
 # Backwards-compatible private names (tests and notebooks import these).
 _combine_sentinel3 = combine_sentinel3
 _mosaic_temporal_tiles = mosaic_temporal_tiles
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisWorkflow:
@@ -50,14 +59,33 @@ class AnalysisWorkflow:
         return self._plan
 
     def discover(self) -> dict[str, list]:
-        """Discover and rank products for every requested sensor."""
+        """Discover and rank products for every requested sensor.
+
+        ``thermal_overpass`` is applied before ranking, so a day-only request
+        keeps the best daytime products rather than losing slots (and
+        downloads) to night passes.
+        """
 
         limit = self.request.max_products_per_sensor
         scan_limit = max(limit, DISCOVERY_SCAN_LIMIT)
-        return {
-            sensor: select_product_refs(SENSOR_ADAPTERS[sensor].search(self.request, limit=scan_limit), limit=limit)
-            for sensor in self.request.sensors
-        }
+        aoi = self.request.aoi
+        longitude = (aoi.west + aoi.east) / 2
+        discovered = {}
+        for sensor in self.request.sensors:
+            products = SENSOR_ADAPTERS[sensor].search(self.request, limit=scan_limit)
+            if sensor in OVERPASS_SENSORS:
+                products = filter_overpass(products, longitude=longitude, overpass=self.request.thermal_overpass)
+            # Granule-wide cloud cover says nothing about how much of the AOI
+            # a product sees: drop slivers before they take a download slot.
+            products = annotate_aoi_coverage(products, aoi)
+            covering = [p for p in products if p.coverage is None or p.coverage >= self.request.min_aoi_coverage]
+            # With a cloud probe, Sentinel-3 gets spare candidates to replace
+            # the ones the probe rejects (see Sentinel3Adapter._select_clear).
+            sensor_limit = limit * PROBE_CANDIDATE_FACTOR if sensor == "sentinel3" and self.request.min_clear_fraction > 0 else limit
+            discovered[sensor] = select_product_refs(covering, limit=sensor_limit)
+            logger.info("%s: %d candidate products, %d cover at least %.0f%% of the AOI, %d selected",
+                        sensor, len(products), len(covering), 100 * self.request.min_aoi_coverage, len(discovered[sensor]))
+        return discovered
 
     def discover_auxiliary(self) -> dict[str, AuxiliarySpec]:
         """Return configured auxiliary selections without making network calls."""
@@ -91,7 +119,13 @@ class AnalysisWorkflow:
             result[spec.provider] = dataset
         return result
 
-    def run(self, datasets: Mapping[str, xr.Dataset], *, terrain: xr.Dataset | None = None) -> AnalysisResult:
+    def run(
+        self,
+        datasets: Mapping[str, xr.Dataset],
+        *,
+        terrain: xr.Dataset | None = None,
+        downscale_store: str | Path | None = None,
+    ) -> AnalysisResult:
         """Fuse already downloaded/processed datasets on one target grid.
 
         ``terrain`` (static ``elevation``/``slope``/``aspect`` on a fine
@@ -123,8 +157,13 @@ class AnalysisWorkflow:
                     continue
                 if dataset.attrs.get("analysis_shape") == "swath":
                     raise ValueError(f"Auxiliary dataset {sensor!r} must be a regular grid or station table")
-                if self.request.predictor_grid is not None:
-                    dataset = self._to_grid(dataset, self.request.predictor_grid)
+                # Reanalysis and model fields are 9-40 km; the thermal grid
+                # already oversamples them. Regridding hourly fields to the
+                # 100 m predictor grid multiplied their size by 100 for no
+                # information.
+                auxiliary_grid = self.request.thermal_grid or self.request.grid or self.request.predictor_grid
+                if auxiliary_grid is not None:
+                    dataset = self._to_grid(dataset, auxiliary_grid)
                 if dataset.attrs.get("metadata_contract"):
                     validate_variable_contract(dataset)
                 auxiliary[sensor] = dataset
@@ -194,60 +233,59 @@ class AnalysisWorkflow:
             "workflow_target_sensor": target_sensor,
             "workflow_temporal_tolerance": str(self.request.temporal_tolerance),
         })
-        predictor_cube = self._merge_predictors(merge_inputs)
+        # One fine-resolution cube per sensor, each on its own acquisition
+        # times. A single cube outer-joined every sensor's times (and once
+        # ERA5's hourly ones), so 78 % of a 6-sensor Berlin cube was NaN fill.
+        predictors = {sensor: dataset for sensor, dataset in prepared.items() if sensor != "sentinel3"}
         if terrain is not None:
-            merged, predictor_cube = self._add_terrain(merged, predictor_cube, terrain)
+            merged = self._add_terrain(merged, terrain)
+        provenance: dict[str, Any] = {"software": build_info(), "sensors": list(prepared), "auxiliary": list(auxiliary), "auxiliary_rasters": list(auxiliary_rasters), "target_sensor": target_sensor, "variables": list(merged.data_vars)}
+        downscaled = None
+        spec = self.request.downscale
+        if spec is not None:
+            if spec.predictor_sensor not in predictors:
+                raise ValueError(f"downscale needs {spec.predictor_sensor} data at fine resolution, but it produced none")
+            logger.info("Downscaling %d scenes per scene with %s", merged.sizes["time"], spec.model)
+            downscaled = downscale_per_scene(
+                merged,
+                predictors[spec.predictor_sensor],
+                target=spec.target,
+                predictors=spec.predictors or None,
+                model=spec.model,
+                coarse_consistent=spec.coarse_consistent,
+                min_samples=spec.min_samples,
+                predictor_sensor=spec.predictor_sensor,
+                terrain=terrain,
+                model_options=spec.model_options,
+                correction=spec.correction,
+                mask_unobserved=spec.mask_unobserved,
+                store=downscale_store,
+                domain=aoi_mask(predictors[spec.predictor_sensor], self.request.aoi) if self.request.aoi.has_geometry else None,
+            )
+            provenance["downscaling"] = {
+                key: downscaled.attrs[f"downscaling_{key}"] for key in ("protocol", "model", "predictors", "scenes", "skipped_scenes")
+            }
         return AnalysisResult(
             cube=merged,
             plan=self._plan,
-            provenance={"sensors": list(prepared), "auxiliary": list(auxiliary), "auxiliary_rasters": list(auxiliary_rasters), "target_sensor": target_sensor, "variables": list(merged.data_vars)},
+            provenance=provenance,
             thermal_cube=prepared.get("sentinel3"),
-            predictor_cube=predictor_cube,
-            auxiliary=auxiliary or None,
+            predictors=predictors,
+            auxiliary={**auxiliary, **{f"{name}_grid": raster for name, raster in auxiliary_rasters.items()}} or None,
             terrain=terrain,
+            downscaled=downscaled,
         )
 
     @staticmethod
-    def _add_terrain(merged: xr.Dataset, predictor_cube: xr.Dataset | None, terrain: xr.Dataset) -> tuple[xr.Dataset, xr.Dataset | None]:
+    def _add_terrain(merged: xr.Dataset, terrain: xr.Dataset) -> xr.Dataset:
         # cos_incidence is computed at fine resolution for each target time and
         # only then averaged: illumination is non-linear in slope/aspect, so
         # aggregating slope first would misstate it. Aspect is circular and
-        # has no meaningful coarse mean, so it is not aggregated.
+        # has no meaningful coarse mean, so it is not aggregated. The fine
+        # static terrain stays in `AnalysisResult.terrain`, without a time axis.
         fine = terrain_predictors(terrain, merged.time.values, crs=terrain.attrs["crs"])
         coarse = harmonize_spatial(merged, fine)
-        merged = merged.assign({name: coarse[name] for name in ("elevation", "slope", "cos_incidence")})
-        if predictor_cube is not None:
-            static = terrain[["elevation", "slope"]].reindex_like(predictor_cube, method="nearest", tolerance=1e-6)
-            predictor_cube = predictor_cube.assign({name: static[name].broadcast_like(predictor_cube["time"]) for name in ("elevation", "slope")})
-        return merged, predictor_cube
-
-    def _merge_predictors(self, prepared: Mapping[str, xr.Dataset]) -> xr.Dataset | None:
-        """Keep a native predictor-grid product separate from thermal fusion."""
-
-        predictors = {sensor: dataset for sensor, dataset in prepared.items() if sensor != "sentinel3"}
-        if not predictors:
-            return None
-        target_sensor = next((sensor for sensor in ("sentinel2", "sentinel1", "sentinel5p") if sensor in predictors), next(iter(predictors)))
-        merged = predictors[target_sensor]
-        validate_cube(merged, require_time=True)
-        for sensor, feature in predictors.items():
-            if sensor == target_sensor:
-                continue
-            if sensor.startswith("auxiliary_"):
-                feature = feature.rename({name: f"{sensor}_{name}" for name in feature.data_vars})
-            feature = harmonize_spatial(merged, feature)
-            ensure_compatible_units(merged, feature)
-            conflicts = set(feature.data_vars).intersection(merged.data_vars)
-            rename = {name: f"{sensor}_{name}" for name in conflicts if name in {"valid_mask", "qa_value"}}
-            if rename:
-                feature = feature.rename(rename)
-            merged = xr.merge(
-                [merged, feature],
-                compat="no_conflicts",
-                join="outer",
-                combine_attrs="override",
-            )
-        return fusion_quality(merged)
+        return merged.assign({name: coarse[name] for name in ("elevation", "slope", "cos_incidence")})
 
     @staticmethod
     def _to_grid(dataset: xr.Dataset, grid) -> xr.Dataset:
@@ -263,13 +301,22 @@ class AnalysisWorkflow:
         gpt: str = "gpt",
         max_workers: int = 1,
         progress: Callable[[str, int, int], None] | None = None,
+        limits: RequestLimits | None = DEFAULT_REQUEST_LIMITS,
     ) -> AnalysisResult:
-        """Discover, download, preprocess and fuse the requested sensors."""
+        """Discover, download, preprocess and fuse the requested sensors.
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        The request is first checked against ``limits`` (``None`` disables
+        the check) so an oversized request fails before any download.
+        Products that fail under ``on_product_error="skip"`` are listed in
+        ``result.provenance["failed_products"]``.
+        """
+
         if max_workers < 1:
             raise ValueError("max_workers must be positive")
+        if limits is not None:
+            check_request(self.request, limits)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         # Lazy: a request for "landsat" alone needs no CDSE credentials at
         # all (it reads directly from Planetary Computer's signed URLs), so
         # ClientConfig.from_env() must not run unless a CDSE-backed sensor
@@ -292,19 +339,33 @@ class AnalysisWorkflow:
             gpt=gpt,
             progress=progress,
         )
+        # Auxiliary sources first: they are small but their request errors
+        # (an unavailable CAMS date, a missing licence) would otherwise only
+        # surface after every satellite product had been downloaded.
+        auxiliary = self.acquire_auxiliary(output_dir / "auxiliary")
         prepared: dict[str, xr.Dataset] = {}
         for sensor, references in self.discover().items():
             unique_references = list({reference.product_id: reference for reference in references}.values())
             if not unique_references:
+                logger.warning("%s: no products found for this AOI and period", sensor)
                 continue
+            logger.info("%s: acquiring %d products", sensor, len(unique_references))
             dataset = SENSOR_ADAPTERS[sensor].acquire(unique_references, context)
             if dataset is not None:
                 prepared[sensor] = dataset
-        prepared.update(self.acquire_auxiliary(output_dir / "auxiliary"))
+                logger.info("%s: prepared %d acquisitions", sensor, dataset.sizes.get("time", 1))
+        prepared.update(auxiliary)
         terrain = None
         if self.request.terrain_predictors:
             terrain_grid = self.request.predictor_grid or self.request.grid
             if terrain_grid is None:
                 raise ValueError("terrain_predictors needs a predictor_grid or grid")
             terrain = terrain_static(terrain_grid)
-        return self.run(prepared, terrain=terrain)
+        store = output_dir / "downscaled.zarr" if self.request.downscale is not None else None
+        result = self.run(prepared, terrain=terrain, downscale_store=store)
+        logger.info("Fused cube: %d times, %d variables", result.cube.sizes["time"], len(result.cube.data_vars))
+        result.provenance["failed_products"] = list(context.failures)
+        result.provenance["probed_out"] = list(context.probed_out)
+        if context.failures:
+            logger.warning("%d products were skipped after failing; see provenance['failed_products']", len(context.failures))
+        return result

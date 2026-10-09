@@ -39,7 +39,7 @@ a tuning artifact or a real finding).
 Usage:
     uv run --extra cdse --extra optical --extra ml python scripts/benchmark_downscalers.py
 
-Environment variables (matching notebooks/berlin_multisensor_downscaling.ipynb):
+Environment variables:
     BENCHMARK_START, BENCHMARK_END         default 2026-08-01 / 2026-08-27
     BENCHMARK_MAX_PRODUCTS                 default 24
     BENCHMARK_RESOLUTION_M                 default 100
@@ -48,6 +48,7 @@ Environment variables (matching notebooks/berlin_multisensor_downscaling.ipynb):
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 import warnings
@@ -94,12 +95,16 @@ def fetch_training_cube():
         resolution_m=RESOLUTION_M,
         max_products_per_sensor=MAX_PRODUCTS,
     )
+    # Daytime passes only (the relation these models learn is a daytime
+    # one), and keep the raw archives already cached under OUTPUT_DIR: the
+    # default "aoi_subset" retention would delete them after reading.
+    request = dataclasses.replace(request, thermal_overpass="day", raw_retention="keep")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     # max_workers=1: this machine froze twice when two live-fetch scripts
     # each ran with max_workers=2 concurrently - keep processing serial as
     # a safety margin, and never run this alongside another heavy script.
     result = AnalysisWorkflow(request).execute(OUTPUT_DIR, config=ClientConfig.from_env(), max_workers=1)
-    return result.cube, result.predictor_cube
+    return result.cube, result.predictors.get("sentinel2")
 
 
 def select_predictors(cube, predictor_cube) -> list[str]:

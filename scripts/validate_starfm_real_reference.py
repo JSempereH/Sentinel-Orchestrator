@@ -31,6 +31,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 from pathlib import Path
@@ -77,6 +78,9 @@ def fetch_sentinel3_cube(city):
         city, START, END, sensors=("sentinel3",), variables=("lst",),
         resolution_m=1000, max_products_per_sensor=60,
     )
+    # Daytime passes only (Landsat's fine_t0 is a daytime observation), and
+    # keep the raw archives already cached under OUTPUT_DIR.
+    request = dataclasses.replace(request, thermal_overpass="day", raw_retention="keep")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     # max_workers=1: this machine froze twice when two live-fetch scripts
     # each ran with max_workers=2 concurrently - keep processing serial as

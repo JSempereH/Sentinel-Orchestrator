@@ -32,4 +32,5 @@ nav:
   - Guides: guides.md
   - Validation: validation.md
   - Downscaling and fusion: downscaling.md
-  - Production roadmap: roadmap.md
+  - Roadmap and limitations: roadmap.md
+  - Change history: history.md

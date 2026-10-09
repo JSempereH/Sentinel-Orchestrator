@@ -6,6 +6,8 @@
 - consistency: coarse-scale conservation wrappers, reaggregation and
   validation helpers.
 - spatiotemporal: STARFM and ESTARFM.
+- per_scene: one model per coarse scene, anchored to it (the workflow's
+  ``AnalysisRequest.downscale`` stage).
 """
 
 from .consistency import (
@@ -21,6 +23,8 @@ from .consistency import (
     validate_reaggregation,
 )
 from .gwr import GWRDownscaler, fit_gwr_downscaler
+from .local import LinearLeafTreeEnsemble, LocalWindowDownscaler, fit_local_window_downscaler
+from .per_scene import DEFAULT_PREDICTORS, PER_SCENE_MODELS, DownscaleSpec, downscale_per_scene
 from .regression import (
     LinearDownscaler,
     RandomForestDownscaler,
@@ -37,6 +41,13 @@ from .uncertainty import ConformalDownscaler, ensemble_spread, fit_conformal_dow
 
 __all__ = [
     "CoarseConsistentDownscaler",
+    "DEFAULT_PREDICTORS",
+    "DownscaleSpec",
+    "LinearLeafTreeEnsemble",
+    "LocalWindowDownscaler",
+    "fit_local_window_downscaler",
+    "PER_SCENE_MODELS",
+    "downscale_per_scene",
     "ConformalDownscaler",
     "ensemble_spread",
     "fit_conformal_downscaler",

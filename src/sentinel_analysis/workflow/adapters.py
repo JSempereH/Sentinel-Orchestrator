@@ -10,12 +10,13 @@ writing one adapter here and listing its name in
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import logging
 from pathlib import Path
 import shutil
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Protocol, TypeVar
+from threading import Lock
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Protocol, TypeVar
 import zipfile
 
 import numpy as np
@@ -23,7 +24,7 @@ import requests
 import xarray as xr
 
 from ..cache import AssetCache
-from ..catalog import ProductRef
+from ..catalog import ProductRef, filter_overpass
 from ..cube import AnalysisGrid
 from ..download import CDSEDownloader
 from ..harmonization.spatial import harmonize_spatial
@@ -44,7 +45,8 @@ from ..sensors.sentinel2 import Sentinel2Catalog, Sentinel2STACCatalog, compose_
 from ..sensors.sentinel3.catalog import CDSECatalog, ProductQuery
 from ..sensors.sentinel3.georeference import grid_l2_lst
 from ..sensors.sentinel3.processing import apply_quality_mask, to_celsius
-from ..sensors.sentinel3.reader import SLSTR_LST_FILES, read_l2_lst
+from ..sensors.sentinel3.reader import SLSTR_LST_FILES, SLSTR_PROBE_FILES, aoi_clear_fraction, read_l2_lst, subset_clear_fraction
+from ..storage import NETCDF_LOCK, netcdf_safe
 from ..sensors.sentinel5p import Sentinel5PCatalog, Sentinel5PReadConfig, grid_s5p, read_s5p_l2
 
 if TYPE_CHECKING:
@@ -58,6 +60,17 @@ ProgressCallback = Callable[[str, int, int], None]
 SUBSET_FORMAT_VERSION = "1"
 T = TypeVar("T")
 S5P_GASES = {"NO2", "SO2", "CO", "O3", "CH4", "HCHO", "AER_AI"}
+
+
+def _locked_read(reader: Callable[..., xr.Dataset], *args: object, **kwargs: object) -> xr.Dataset:
+    """Read and load a NetCDF product under NETCDF_LOCK (downloads stay parallel)."""
+
+    with NETCDF_LOCK:
+        return reader(*args, **kwargs).load()
+
+
+class ProductAcquisitionError(RuntimeError):
+    """Every product selected for a sensor failed to download or read."""
 
 
 def concat_time(datasets: list[xr.Dataset]) -> xr.Dataset:
@@ -162,6 +175,11 @@ class AcquisitionContext:
     max_workers: int = 1
     gpt: str = "gpt"
     progress: ProgressCallback | None = None
+    # One record per product left out under on_product_error="skip".
+    failures: list[dict[str, str]] = field(default_factory=list)
+    # Products a cloud probe found too cloudy over the AOI to download.
+    probed_out: list[dict[str, object]] = field(default_factory=list)
+    _failures_lock: Lock = field(default_factory=Lock, repr=False)
 
     @property
     def downloader(self) -> CDSEDownloader:
@@ -183,26 +201,49 @@ class AcquisitionContext:
         if self.progress:
             self.progress(sensor, done, total)
 
-    def map_products(self, sensor: str, references: list[ProductRef], function: Callable[[ProductRef], T]) -> list[T]:
-        """Apply ``function`` per product, in parallel only when allowed."""
+    def map_products(self, sensor: str, references: list[ProductRef], function: Callable[[ProductRef], T], *, parallel: bool = True) -> list[T]:
+        """Apply ``function`` per product, in parallel only when allowed.
 
-        if self.max_workers > 1 and len(references) > 1:
+        Under ``on_product_error="skip"`` a product whose ``function`` raises
+        is logged, recorded in ``failures`` and left out of the result, so one
+        corrupt download or unreadable scene no longer aborts the whole run.
+        If every product fails, ``ProductAcquisitionError`` is raised instead:
+        an empty sensor would silently change what the run produces (e.g.
+        another sensor becoming the fusion target).
+        """
+
+        def guarded(reference: ProductRef) -> T | None:
+            try:
+                return function(reference)
+            except Exception as exc:
+                if self.request.on_product_error == "raise":
+                    raise
+                logger.warning("Skipping %s product %s: %s", sensor, reference.name, exc, exc_info=True)
+                with self._failures_lock:
+                    self.failures.append({"sensor": sensor, "product": reference.name, "error": f"{type(exc).__name__}: {exc}"})
+                return None
+
+        if parallel and self.max_workers > 1 and len(references) > 1:
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                results = list(executor.map(function, references))
+                results = list(executor.map(guarded, references))
         else:
-            results = [function(reference) for reference in references]
+            results = [guarded(reference) for reference in references]
         self.report(sensor, len(results), len(references))
-        return results
-
-    def download_all(self, sensor: str, references: list[ProductRef]) -> list[Path]:
-        def download(reference: ProductRef) -> Path:
-            logger.info("Downloading %s", reference.name)
-            return self.downloader.download(reference, self.output_dir / "downloads" / sensor)
-
-        return self.map_products(sensor, references, download)
+        kept = [result for result in results if result is not None]
+        if references and not kept:
+            errors = "; ".join(f"{item['product']}: {item['error']}" for item in self.failures if item["sensor"] == sensor)
+            raise ProductAcquisitionError(f"All {len(references)} {sensor} products failed: {errors}")
+        return kept
 
     def extract(self, sensor: str, archive: Path) -> Path:
         return self.downloader.extract(archive, self.output_dir / "extracted" / sensor / Path(archive).stem)
+
+    def subset_path(self, sensor: str, reference: ProductRef) -> Path:
+        """Where ``subset`` stores this product's AOI subset."""
+
+        aoi = self.request.aoi
+        key = hashlib.sha1(f"{aoi.west:.6f},{aoi.south:.6f},{aoi.east:.6f},{aoi.north:.6f}:{SUBSET_FORMAT_VERSION}".encode(), usedforsecurity=False).hexdigest()[:12]
+        return self.output_dir / "subsets" / sensor / f"{reference.name}__{key}.nc"
 
     def subset(self, sensor: str, reference: ProductRef, build: Callable[[], tuple[xr.Dataset, list[Path]]]) -> xr.Dataset:
         """Return a product's AOI subset, building and storing it once.
@@ -217,20 +258,21 @@ class AcquisitionContext:
         """
 
         aoi = self.request.aoi
-        key = hashlib.sha1(f"{aoi.west:.6f},{aoi.south:.6f},{aoi.east:.6f},{aoi.north:.6f}:{SUBSET_FORMAT_VERSION}".encode()).hexdigest()[:12]
-        directory = self.output_dir / "subsets" / sensor
+        path = self.subset_path(sensor, reference)
+        directory = path.parent
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{reference.name}__{key}.nc"
         cache = AssetCache(directory / ".cache")
         if path.exists() and cache.valid(path.name, path):
-            with xr.open_dataset(path) as stored:
+            with NETCDF_LOCK, xr.open_dataset(path) as stored:
                 return stored.load()
         dataset, raw_paths = build()
-        dataset = dataset.load()
-        dataset.close()
+        with NETCDF_LOCK:  # build() may return a lazily read NetCDF
+            dataset = dataset.load()
+            dataset.close()
         dataset.attrs.update({"source_product_id": reference.product_id, "source_product_name": reference.name})
         partial = path.with_name(path.name + ".part")
-        _netcdf_safe(dataset).to_netcdf(partial)
+        with NETCDF_LOCK:
+            netcdf_safe(dataset).to_netcdf(partial)
         partial.replace(path)
         cache.record(path.name, path, metadata={"product_id": reference.product_id, "aoi": [aoi.west, aoi.south, aoi.east, aoi.north]})
         if self.request.raw_retention == "aoi_subset":
@@ -240,32 +282,6 @@ class AcquisitionContext:
                 else:
                     raw.unlink(missing_ok=True)
         return dataset
-
-
-def _netcdf_safe(dataset: xr.Dataset) -> xr.Dataset:
-    """Coerce attributes NetCDF cannot store (bool, None, nested values)."""
-
-    def clean(attrs: dict) -> dict:
-        result: dict[str, Any] = {}
-        for key, value in attrs.items():
-            if value is None:
-                continue
-            if isinstance(value, (bool, np.bool_)):
-                result[key] = int(value)
-            elif isinstance(value, (str, int, float, np.integer, np.floating, np.ndarray)):
-                result[key] = value
-            elif isinstance(value, (list, tuple)) and all(isinstance(item, (int, float, np.integer, np.floating)) for item in value):
-                result[key] = np.asarray(value)
-            else:
-                result[key] = str(value)
-        return result
-
-    safe = dataset.copy()
-    safe.attrs = clean(dict(safe.attrs))
-    for name in list(safe.variables):
-        safe[name].attrs = clean(dict(safe[name].attrs))
-        safe[name].encoding = {}
-    return safe
 
 
 class SensorAdapter(Protocol):
@@ -291,22 +307,25 @@ class Sentinel1Adapter:
         if backend == "pc_rtc":
             grid = context.predictor_grid(self.name)
             return concat_time(context.map_products(self.name, references, lambda reference: sentinel1_indices(read_s1_rtc_cog(reference, grid))))
+        processed = context.output_dir / "processed" / self.name
         if backend == "hyp3_rtc":
             # Never downloads the raw GRD from CDSE at all: ASF HyP3 processes
             # the named granule entirely in the cloud, so the only input is
             # `reference.name` (the SAFE product name).
-            processed = context.output_dir / "processed" / self.name
-            datasets = [sentinel1_indices(read_s1_rtc(process_s1_rtc(reference.name, processed).output_path)) for reference in references]
-            context.report(self.name, len(datasets), len(references))
-            return concat_time(datasets)
-        archives = context.download_all(self.name, references)
+            def hyp3(reference: ProductRef) -> xr.Dataset:
+                return sentinel1_indices(read_s1_rtc(process_s1_rtc(reference.name, processed).output_path))
+
+            return concat_time(context.map_products(self.name, references, hyp3, parallel=False))
         reader = read_s1_ard if backend == "s1ard" else read_s1_grd
-        datasets = []
-        for archive in archives:
+
+        # Serial: each local SNAP/s1ard run needs ~11 GB of RAM.
+        def local(reference: ProductRef) -> xr.Dataset:
+            archive = context.downloader.download(reference, context.output_dir / "downloads" / self.name)
             extracted = context.extract(self.name, archive)
-            result = process_s1(extracted, context.output_dir / "processed" / self.name, backend=backend, gpt=context.gpt)
-            datasets.append(sentinel1_indices(reader(result.output_path)))
-        return concat_time(datasets)
+            result = process_s1(extracted, processed, backend=backend, gpt=context.gpt)
+            return sentinel1_indices(reader(result.output_path))
+
+        return concat_time(context.map_products(self.name, references, local, parallel=False))
 
 
 class Sentinel2Adapter:
@@ -346,24 +365,67 @@ class Sentinel3Adapter:
     def acquire(self, references: list[ProductRef], context: AcquisitionContext) -> xr.Dataset | None:
         grid = context.thermal_grid("Sentinel-3 LST")
         downloads = context.output_dir / "downloads" / self.name
+        if context.request.min_clear_fraction > 0:
+            references = self._select_clear(references, context, downloads)
 
         def product_subset(reference: ProductRef) -> xr.Dataset:
             def build() -> tuple[xr.Dataset, list[Path]]:
                 archive = downloads / f"{reference.name}.zip"
                 if archive.exists():  # a full archive from an earlier run
-                    return read_l2_lst(archive, aoi=context.request.aoi), [archive]
+                    return _locked_read(read_l2_lst, archive, aoi=context.request.aoi), [archive]
                 try:
                     # Only the ~16 MB of files the analysis reads, not the ~70 MB archive.
                     root = context.downloader.download_files(reference, SLSTR_LST_FILES, downloads)
                 except requests.HTTPError:
                     logger.warning("Partial download of %s failed; downloading the full archive", reference.name)
                     archive = context.downloader.download(reference, downloads)
-                    return read_l2_lst(archive, aoi=context.request.aoi), [archive]
-                return read_l2_lst(root, aoi=context.request.aoi), [root]
+                    return _locked_read(read_l2_lst, archive, aoi=context.request.aoi), [archive]
+                return _locked_read(read_l2_lst, root, aoi=context.request.aoi), [root]
             return context.subset(self.name, reference, build)
 
         subsets = context.map_products(self.name, references, product_subset)
         return to_celsius(combine_sentinel3(subsets, grid))
+
+    def _select_clear(self, references: list[ProductRef], context: AcquisitionContext, downloads: Path) -> list[ProductRef]:
+        """Probe candidates in ranking order until enough are clear over the AOI.
+
+        Each probe downloads only ``SLSTR_PROBE_FILES`` (~14 MB) and measures
+        the share of the AOI that is clear and within the view-angle cut; the rest of
+        a product is fetched only if it passes. Catalogue cloud cover is per
+        granule and says little about the AOI: without this, many of the
+        products downloaded for a downscaling run were later skipped as
+        clouded. Products already stored as AOI subsets are judged from the
+        subset, with no download.
+        """
+
+        request = context.request
+        accepted: list[ProductRef] = []
+        for reference in references:
+            if len(accepted) >= request.max_products_per_sensor:
+                break
+            root = None
+            subset = context.subset_path(self.name, reference)
+            try:
+                if subset.exists():
+                    # Judged from the stored subset: being cached says nothing about its clouds.
+                    with NETCDF_LOCK:
+                        clear = subset_clear_fraction(subset, request.aoi)
+                else:
+                    root = context.downloader.download_files(reference, SLSTR_PROBE_FILES, downloads)
+                    with NETCDF_LOCK:
+                        clear = aoi_clear_fraction(root, request.aoi)
+            except (requests.RequestException, OSError, KeyError, ValueError) as exc:
+                logger.warning("Could not probe %s (%s); acquiring it unprobed", reference.name, exc)
+                accepted.append(reference)
+                continue
+            if clear is not None and clear >= request.min_clear_fraction:
+                accepted.append(reference)
+                continue
+            context.probed_out.append({"product": reference.name, "aoi_clear_fraction": None if clear is None else round(clear, 3)})
+            if root is not None and request.raw_retention == "aoi_subset":
+                shutil.rmtree(root, ignore_errors=True)
+        logger.info("sentinel3: probed %d candidates for clear sky over the AOI, kept %d", len(accepted) + len(context.probed_out), len(accepted))
+        return accepted
 
 
 class Sentinel5PAdapter:
@@ -374,7 +436,11 @@ class Sentinel5PAdapter:
         return next((value.upper() for value in request.variables if value.upper() in S5P_GASES), "NO2")
 
     def search(self, request: "AnalysisRequest", *, limit: int) -> list[ProductRef]:
-        return Sentinel5PCatalog().search(request.aoi, request.start, request.end, gas=self.gas(request), limit=limit)
+        # TROPOMI's trace-gas retrievals need sunlight: night-side orbits
+        # come back empty after a ~600 MB download each.
+        products = Sentinel5PCatalog().search(request.aoi, request.start, request.end, gas=self.gas(request), limit=limit)
+        aoi = request.aoi
+        return filter_overpass(products, longitude=(aoi.west + aoi.east) / 2, overpass="day")
 
     def acquire(self, references: list[ProductRef], context: AcquisitionContext) -> xr.Dataset | None:
         request = context.request
@@ -391,7 +457,7 @@ class Sentinel5PAdapter:
                 files = sorted(extracted.rglob("*.nc")) if extracted.is_dir() else [extracted]
                 if not files:
                     raise FileNotFoundError(f"No NetCDF product found after extracting {archive}")
-                return read_s5p_l2(files[0], config=config, aoi=request.aoi), raw
+                return _locked_read(read_s5p_l2, files[0], config=config, aoi=request.aoi), raw
             return context.subset(self.name, reference, build)
 
         datasets = []

@@ -1,7 +1,7 @@
 [project]
 name = "sentinel-analysis"
-version = "0.1.0"
-description = "Analysis-ready multisensor Sentinel analysis over areas of interest"
+version = "0.2.0"
+description = "Multisensor Earth-observation cubes over an area of interest, with land-surface temperature downscaling"
 readme = "README.md"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
@@ -15,6 +15,7 @@ dependencies = [
     "pyproj>=3.7.0",
     "python-dotenv>=1.1.0",
     "requests>=2.32.0",
+    "shapely>=2.0.0",
     "xarray>=2025.1.0",
 ]
 

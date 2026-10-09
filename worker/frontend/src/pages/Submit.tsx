@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AxiosError } from "axios";
 import { AOIMap } from "../components/Map/AOIMap";
-import { jobsApi, type AuxiliarySpec } from "../api/client";
+import { jobsApi, type AOI, type AuxiliarySpec } from "../api/client";
 
 // Mirrors sentinel_analysis.workflow.request.SUPPORTED_SENSORS.
 const SENSORS = [
@@ -36,6 +36,9 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
   const [auxProviders, setAuxProviders] = useState<Set<string>>(new Set());
   const [resolutionM, setResolutionM] = useState(100);
   const [maxProducts, setMaxProducts] = useState(20);
+  const [dayOnly, setDayOnly] = useState(true);
+  const [downscale, setDownscale] = useState(false);
+  const [terrain, setTerrain] = useState(false);
 
   const submitMut = useMutation({
     mutationFn: () => {
@@ -50,6 +53,9 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
           resolution_m: resolutionM,
           max_products_per_sensor: maxProducts,
           auxiliary,
+          thermal_overpass: dayOnly ? "day" : "any",
+          terrain_predictors: terrain,
+          downscale: downscale ? { model: "local_trees" } : null,
         },
         name.trim() || undefined,
       );
@@ -64,7 +70,10 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
     setSet(next);
   }
 
-  const canSubmit = geometry !== null && sensors.size > 0 && start && end && !submitMut.isPending;
+  // Downscaling sharpens Sentinel-3 with Sentinel-2 predictors (mirrors the
+  // request's own validation, so the error shows before submitting).
+  const downscaleBlocked = downscale && !(sensors.has("sentinel3") && sensors.has("sentinel2"));
+  const canSubmit = geometry !== null && sensors.size > 0 && start && end && !downscaleBlocked && !submitMut.isPending;
 
   return (
     <div className="page">
@@ -124,6 +133,27 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
             </div>
           </div>
 
+          <div className="field">
+            <label>Options</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label className={`check-row${dayOnly ? " checked" : ""}`}>
+                <input type="checkbox" checked={dayOnly} onChange={() => setDayOnly(!dayOnly)} />
+                Daytime thermal passes only
+              </label>
+              <label className={`check-row${terrain ? " checked" : ""}`}>
+                <input type="checkbox" checked={terrain} onChange={() => setTerrain(!terrain)} />
+                Terrain predictors (elevation, slope, illumination)
+              </label>
+              <label className={`check-row${downscale ? " checked" : ""}`}>
+                <input type="checkbox" checked={downscale} onChange={() => setDownscale(!downscale)} />
+                Downscale temperature to the resolution below (needs Sentinel-2 + Sentinel-3)
+              </label>
+            </div>
+            {downscaleBlocked && (
+              <div style={{ fontSize: 12, color: "var(--danger)" }}>Downscaling needs both Sentinel-3 and Sentinel-2 selected.</div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div className="field">
               <label>Resolution (m)</label>
@@ -165,10 +195,14 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
   );
 }
 
-function boundsOf(geometry: GeoJSON.Geometry): { west: number; south: number; east: number; north: number } {
+function boundsOf(geometry: GeoJSON.Geometry): AOI {
   const coords: [number, number][] =
     geometry.type === "Polygon" ? (geometry.coordinates[0] as [number, number][]) : [];
   const lons = coords.map((c) => c[0]);
   const lats = coords.map((c) => c[1]);
-  return { west: Math.min(...lons), south: Math.min(...lats), east: Math.max(...lons), north: Math.max(...lats) };
+  const bounds: AOI = { west: Math.min(...lons), south: Math.min(...lats), east: Math.max(...lons), north: Math.max(...lats) };
+  // Only a non-rectangular drawing carries its polygon: a box needs no mask.
+  const onEdge = coords.every(([lon, lat]) => (lon === bounds.west || lon === bounds.east) && (lat === bounds.south || lat === bounds.north));
+  if (geometry.type === "Polygon" && !onEdge) bounds.geometry = geometry;
+  return bounds;
 }

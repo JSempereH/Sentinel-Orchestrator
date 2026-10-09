@@ -53,17 +53,15 @@ jobs:
         with:
           enable-cache: true
 
-      # worker/tests/ mocks execute_and_persist in every job-submission
-      # test (see worker/tests/test_jobs.py's own docstring), so it needs
-      # this repo's own extras (for app/runner.py's imports at collection
-      # time), not `ml`/`landsat`/`ecostress` - those are only exercised by
-      # a real AnalysisWorkflow.execute() run, which nothing here does.
+      # Installs exactly what the container installs (requirements.lock),
+      # so a lock that no longer resolves or imports fails here, not in a
+      # deployment. worker/tests/ never runs a real analysis.
       - name: Install worker dependencies
         working-directory: worker
         run: |
-          uv venv .venv
-          uv pip install --python .venv -r requirements.txt -r requirements-dev.txt
-          uv pip install --python .venv -e "..[cdse,auxiliary,optical,cloud,hyp3]"
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv -r requirements.lock -r requirements-dev.txt
+          uv pip install --python .venv --no-deps -e ..
 
       # `python -m pytest`, not the bare `.venv/bin/pytest` binary - the
       # latter does not insert the current directory onto sys.path, so
@@ -72,3 +70,27 @@ jobs:
       - name: Test
         working-directory: worker
         run: .venv/bin/python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker/frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: worker/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (type-checks with tsc)
+        run: npm run build

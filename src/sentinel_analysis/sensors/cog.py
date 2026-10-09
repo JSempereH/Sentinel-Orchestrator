@@ -43,11 +43,19 @@ def read_cog_to_grid(
     band: int = 1,
     attempts: int = 3,
     retry_delay_s: float = 2.0,
+    use_overviews: bool = False,
 ) -> np.ndarray:
     """Read one raster band resampled onto ``grid`` as float32, NaN outside data.
 
     ``nodata`` overrides the file's own nodata value (STAC ``raster:bands``
     metadata is sometimes more reliable than the GeoTIFF tag).
+
+    With ``use_overviews`` a projected source is read from its coarsest
+    overview that is still at least as fine as ``grid`` (80 m for 10 m bands
+    on a 100 m grid), which transfers about a third of the bytes. Off by
+    default: on a real Sentinel-2 L2A scene over Berlin at 100 m the overview
+    read correlated only 0.95 with the full-resolution average (NDVI 95th
+    percentile difference 0.086), too large a change for predictors.
     """
 
     if resampling not in _RESAMPLING:
@@ -66,7 +74,9 @@ def read_cog_to_grid(
         try:
             # GDAL retries transient HTTP errors itself; the outer loop also
             # re-opens the dataset, which survives a dropped connection.
-            with rasterio.Env(GDAL_HTTP_MAX_RETRY="4", GDAL_HTTP_RETRY_DELAY="2"), rasterio.open(href) as source:
+            level = _overview_level(href, grid) if use_overviews else None
+            open_kwargs = {"overview_level": level} if level is not None else {}
+            with rasterio.Env(GDAL_HTTP_MAX_RETRY="4", GDAL_HTTP_RETRY_DELAY="2"), rasterio.open(href, **open_kwargs) as source:
                 source_nodata = nodata if nodata is not None else source.nodata
                 with WarpedVRT(
                     source,
@@ -85,6 +95,20 @@ def read_cog_to_grid(
                 raise
             time.sleep(retry_delay_s * 2**attempt)
     raise AssertionError("unreachable")
+
+
+def _overview_level(href: str, grid: AnalysisGrid) -> int | None:
+    """Index of the coarsest overview no coarser than ``grid``, or None to read full resolution."""
+
+    import rasterio
+
+    with rasterio.open(href) as source:
+        if source.crs is None or not source.crs.is_projected:
+            return None
+        resolution = abs(source.res[0])
+        factors = source.overviews(1)
+    usable = [index for index, factor in enumerate(factors) if resolution * factor <= grid.resolution_m]
+    return usable[-1] if usable else None
 
 
 def asset_scale_offset(asset: Mapping[str, Any]) -> tuple[float, float, float | None]:
@@ -117,6 +141,7 @@ def stac_product_ref(item: STACItem, *, product_type: str) -> ProductRef:
             "platform": item.properties.get("platform"),
             "properties": dict(item.properties),
             "assets": item.assets,
+            "geometry": item.raw.get("geometry"),
         },
     )
 

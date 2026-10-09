@@ -102,7 +102,7 @@ def _stac_item_to_product_ref(item: STACItem) -> ProductRef:
         timeliness=None,
         online=True,
         download_url=lst_asset["href"],
-        metadata={"attributes": {}, "assets": {a.get("href", ""): a for a in item.assets.values()}},
+        metadata={"attributes": {}, "assets": {a.get("href", ""): a for a in item.assets.values()}, "geometry": item.raw.get("geometry")},
     )
 
 

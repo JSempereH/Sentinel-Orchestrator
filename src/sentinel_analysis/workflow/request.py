@@ -6,27 +6,42 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
+import warnings
 from typing import Iterable, Mapping
 
 import numpy as np
 
+from ..catalog import OVERPASSES
 from ..cities import CitySpec
 from ..config import AOI
 from ..cube import AnalysisGrid
+from ..downscale.per_scene import DownscaleSpec
 from ..providers import AUXILIARY_PROVIDERS, AuxiliarySpec
 
 
 SUPPORTED_SENSORS = ("sentinel1", "sentinel2", "sentinel3", "sentinel5p", "landsat", "ecostress")
 # "pc_rtc" reads Planetary Computer's pre-processed RTC COGs (no SNAP, no
 # HyP3); "stac_cog" reads Sentinel-2 L2A COGs in place instead of
-# downloading full SAFE archives. Both are opt-in until validated on real
-# scenes - see docs/roadmap.md.
+# downloading full SAFE archives. Both are validated on real scenes but stay
+# opt-in because they change the data source - see docs/roadmap.md.
 SENTINEL1_BACKENDS = ("snap", "hyp3_rtc", "pc_rtc", "s1ard")
 SENTINEL2_SOURCES = ("cdse_safe", "stac_cog")
+# Accepted but not trustworthy yet (docs/roadmap.md): a request using one
+# gets a UserWarning, recorded in logs, instead of failing.
+EXPERIMENTAL_SENTINEL1_BACKENDS = {
+    "hyp3_rtc": "has never been run against a real HyP3 submission",
+    "s1ard": "is broken by a bug in the external spatialist library",
+}
 # "aoi_subset": after a product is read, keep only an AOI-cropped NetCDF of
 # the variables the analysis uses (re-used by later runs over the same AOI)
 # and delete the downloaded original. "keep": also keep the original.
 RAW_RETENTION = ("aoi_subset", "keep")
+# Thermal sensors whose discovery honours `thermal_overpass`.
+OVERPASS_SENSORS = ("sentinel3", "ecostress")
+# "skip": a product that fails to download/read is logged, recorded in the
+# result's provenance and left out; the run fails only if every product of a
+# sensor fails. "raise": the first failure aborts the run.
+PRODUCT_ERROR_POLICIES = ("skip", "raise")
 
 
 def _as_instant(value: str | date | datetime, *, end_of_day: bool = False) -> datetime:
@@ -76,8 +91,19 @@ class AnalysisRequest:
     raw_retention: str = "aoi_subset"
     terrain_predictors: bool = False
     auxiliary: tuple[AuxiliarySpec, ...] = ()
+    thermal_overpass: str = "any"
+    on_product_error: str = "skip"
+    downscale: DownscaleSpec | None = None
+    # Products whose catalogue footprint covers less of the AOI than this
+    # are dropped before ranking (0 keeps them all).
+    min_aoi_coverage: float = 0.3
+    # Sentinel-3 only: probe each candidate's cloud flags over the AOI and
+    # download it only if at least this share of the AOI is clear (0 = off).
+    min_clear_fraction: float = 0.0
 
     def __post_init__(self) -> None:
+        if isinstance(self.sensors, str):
+            raise ValueError(f"sensors must be a list of sensor names, not the string {self.sensors!r}")
         sensors = tuple(sensor.lower() for sensor in self.sensors)
         if not sensors:
             raise ValueError("At least one sensor is required")
@@ -100,10 +126,27 @@ class AnalysisRequest:
             raise ValueError("s2_min_observations must be positive")
         if self.sentinel1_backend not in SENTINEL1_BACKENDS:
             raise ValueError(f"sentinel1_backend must be one of {SENTINEL1_BACKENDS}")
+        if "sentinel1" in sensors and self.sentinel1_backend in EXPERIMENTAL_SENTINEL1_BACKENDS:
+            reason = EXPERIMENTAL_SENTINEL1_BACKENDS[self.sentinel1_backend]
+            warnings.warn(f"sentinel1_backend={self.sentinel1_backend!r} is experimental: it {reason}; see docs/roadmap.md", UserWarning, stacklevel=3)
         if self.sentinel2_source not in SENTINEL2_SOURCES:
             raise ValueError(f"sentinel2_source must be one of {SENTINEL2_SOURCES}")
         if self.raw_retention not in RAW_RETENTION:
             raise ValueError(f"raw_retention must be one of {RAW_RETENTION}")
+        if self.thermal_overpass not in OVERPASSES:
+            raise ValueError(f"thermal_overpass must be one of {OVERPASSES}")
+        if not 0 <= self.min_clear_fraction <= 1:
+            raise ValueError("min_clear_fraction must be between 0 and 1")
+        if not 0 <= self.min_aoi_coverage <= 1:
+            raise ValueError("min_aoi_coverage must be between 0 and 1")
+        if self.on_product_error not in PRODUCT_ERROR_POLICIES:
+            raise ValueError(f"on_product_error must be one of {PRODUCT_ERROR_POLICIES}")
+        downscale = self.downscale
+        if downscale is not None and not isinstance(downscale, DownscaleSpec):
+            downscale = DownscaleSpec.from_dict(downscale)
+        if downscale is not None and downscale.predictor_sensor not in sensors:
+            raise ValueError(f"downscale needs its predictor sensor {downscale.predictor_sensor!r} in sensors")
+        object.__setattr__(self, "downscale", downscale)
         auxiliary = tuple(value if isinstance(value, AuxiliarySpec) else AuxiliarySpec.from_dict(value) for value in self.auxiliary)
         providers = [value.provider for value in auxiliary]
         if len(providers) != len(set(providers)):
@@ -167,7 +210,7 @@ class AnalysisRequest:
         """Serialize the request without embedding data or credentials."""
 
         return {
-            "aoi": {"west": self.aoi.west, "south": self.aoi.south, "east": self.aoi.east, "north": self.aoi.north},
+            "aoi": self.aoi.to_dict(),
             "start": str(self.start),
             "end": str(self.end),
             "sensors": list(self.sensors),
@@ -188,6 +231,11 @@ class AnalysisRequest:
             "raw_retention": self.raw_retention,
             "terrain_predictors": self.terrain_predictors,
             "auxiliary": [value.to_dict() for value in self.auxiliary],
+            "thermal_overpass": self.thermal_overpass,
+            "on_product_error": self.on_product_error,
+            "downscale": self.downscale.to_dict() if self.downscale else None,
+            "min_aoi_coverage": self.min_aoi_coverage,
+            "min_clear_fraction": self.min_clear_fraction,
         }
 
     def save_json(self, path: str | Path) -> Path:
@@ -202,7 +250,7 @@ class AnalysisRequest:
                 return None
             return AnalysisGrid.from_bounds(tuple(data["bounds"]), crs=data["crs"], resolution_m=data["resolution_m"], grid_id=data.get("grid_id"), city_id=data.get("city_id"))
         return cls(
-            aoi=AOI(**value["aoi"]),
+            aoi=AOI.from_dict(value["aoi"]),
             start=value["start"],
             end=value["end"],
             sensors=tuple(value.get("sensors", ("sentinel3",))),
@@ -223,6 +271,11 @@ class AnalysisRequest:
             raw_retention=value.get("raw_retention", "aoi_subset"),
             terrain_predictors=bool(value.get("terrain_predictors", False)),
             auxiliary=tuple(AuxiliarySpec.from_dict(item) for item in value.get("auxiliary", ())),
+            thermal_overpass=value.get("thermal_overpass", "any"),
+            on_product_error=value.get("on_product_error", "skip"),
+            downscale=DownscaleSpec.from_dict(value["downscale"]) if value.get("downscale") else None,
+            min_aoi_coverage=value.get("min_aoi_coverage", 0.3),
+            min_clear_fraction=value.get("min_clear_fraction", 0.0),
         )
 
     @classmethod

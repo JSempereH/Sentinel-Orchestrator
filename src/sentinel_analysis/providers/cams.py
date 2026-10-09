@@ -27,6 +27,8 @@ CAMS_VARIABLES: Mapping[str, Mapping[str, str]] = {
     "PM10": {"api": "particulate_matter_10um", "source": "pm10", "units": "kg m-3", "standard_name": "mass_concentration_of_pm10_ambient_aerosol_in_air"},
 }
 CAMS_SOURCE_TO_NAME = {value["source"]: name for name, value in CAMS_VARIABLES.items()}
+FORECAST_RUNS = ["00:00", "12:00"]
+FORECAST_LEADTIMES = ["0", "3", "6", "9"]
 
 
 @dataclass(frozen=True)
@@ -87,8 +89,13 @@ class CAMSProvider:
             "data_format": self.config.data_format,
         }
         if "forecast" in self.config.dataset:
+            # The forecast is initialised at 00 and 12 UTC only. Lead times
+            # 0-9 h from both runs cover every 3-hourly step of each day
+            # exactly once with the freshest forecast; asking for all 24
+            # hours x 0-120 h (as before) requested ~1000 fields per day.
             request["type"] = ["forecast"]
-            request["leadtime_hour"] = [str(hour) for hour in range(0, 121, 3)]
+            request["time"] = FORECAST_RUNS
+            request["leadtime_hour"] = FORECAST_LEADTIMES
         return request
 
     def download(self, aoi: AOI, start: str, end: str, spec: AuxiliarySpec, output_dir: str | Path) -> AuxiliaryArtifact:
@@ -116,7 +123,15 @@ class CAMSProvider:
             client_kwargs["key"] = config.api_key
         client = cdsapi.Client(**client_kwargs)
         temporary = path.with_suffix(path.suffix + ".part")
-        client.retrieve(dataset, request, str(temporary))
+        try:
+            client.retrieve(dataset, request, str(temporary))
+        except Exception as exc:
+            if "reanalysis" in dataset and "valid combination" in str(exc):
+                raise AuxiliaryProviderError(
+                    f"ADS rejected {dataset} for {start} to {end}. The CAMS reanalysis is published months behind real time; "
+                    "for recent dates use AuxiliarySpec('cams', dataset='cams-global-atmospheric-composition-forecasts')."
+                ) from exc
+            raise
         if not temporary.exists():
             raise AuxiliaryProviderError(f"ADS did not create the expected file: {temporary}")
         temporary.replace(path)

@@ -11,12 +11,23 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     ports:
       - "8100:8100"
     env_file:
       - worker/.env
     volumes:
       - sentinel-worker-data:/data
+    restart: unless-stopped
+    # Reaps the job processes the worker spawns and forwards signals.
+    init: true
+    # A hard ceiling so a runaway job is OOM-killed inside the container
+    # (failing only that job) instead of freezing the host. Leave headroom
+    # for the rest of the machine.
+    mem_limit: ${WORKER_MEM_LIMIT:-12g}
+    # Time for running jobs to receive SIGTERM before being killed.
+    stop_grace_period: 30s
 
 volumes:
   sentinel-worker-data:

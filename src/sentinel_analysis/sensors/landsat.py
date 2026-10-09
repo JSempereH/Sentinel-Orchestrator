@@ -67,6 +67,7 @@ def _stac_item_to_product_ref(item: STACItem) -> ProductRef:
             "attributes": {"cloudCover": item.properties.get("eo:cloud_cover")},
             "platform": item.properties.get("platform"),
             "assets": item.assets,
+            "geometry": item.raw.get("geometry"),
         },
     )
 
