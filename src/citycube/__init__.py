@@ -7,7 +7,7 @@ from .cities import CitySpec, get_city, list_cities
 from .config import AOI, ClientConfig
 from .cube import AnalysisGrid, CubeValidationError, GridSpec, projected_bounds, tag_cube, utm_crs, validate_cube, validate_observation_set
 from .zones import DEFAULT_ZONAL_STATISTICS, ZONAL_STATISTICS, ZoneSet, aoi_mask, clip_to_aoi, zonal_statistics
-from .downscale import (CoarseConsistentDownscaler, DownscaleSpec, LocalWindowDownscaler, downscale_per_scene, fit_local_window_downscaler, ConformalDownscaler, ensemble_spread, fit_conformal_downscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
+from .downscale import (atpk_residual_field, block_aggregate, sharpen_landsat, CoarseConsistentDownscaler, DownscaleSpec, LocalWindowDownscaler, downscale_per_scene, fit_local_window_downscaler, ConformalDownscaler, ensemble_spread, fit_conformal_downscaler, GWRDownscaler, LinearDownscaler, RandomForestDownscaler,
                         SklearnDownscaler, XGBoostDownscaler, fit_sklearn_downscaler, fit_coarse_consistent_gwr_downscaler,
                         fit_coarse_consistent_linear_downscaler, fit_coarse_consistent_random_forest_downscaler,
                         fit_coarse_consistent_tsharp_downscaler, fit_coarse_consistent_xgboost_downscaler,
@@ -104,6 +104,9 @@ __all__ = [
     "zonal_statistics",
     "downscale_per_scene",
     "fit_local_window_downscaler",
+    "atpk_residual_field",
+    "block_aggregate",
+    "sharpen_landsat",
     "filter_overpass",
     "local_solar_hour",
     "ProductAcquisitionError",

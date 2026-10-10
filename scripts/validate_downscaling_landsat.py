@@ -1,7 +1,7 @@
 """Does per-scene downscaling beat the 1 km observation against Landsat?
 
 Fetches Sentinel-3 (daytime, cloud-probed), Sentinel-2 and Landsat 8/9 over
-Berlin, then for each downscaling model:
+Berlin, then for each downscaling model and residual correction:
 
 * compares the 100 m result with every Landsat scene of the same morning
   (Landsat is never used for training) against the baseline of repeating
@@ -46,13 +46,16 @@ CITY = os.getenv("VALIDATION_CITY", "berlin")
 OUTPUT = PROJECT_ROOT / "output" / "downscaling-landsat-validation"
 WORK = PROJECT_ROOT / "output" / "notebooks" / "work"  # shares the guide notebooks' cache
 MODELS = {
-    "linear": {"model": "linear"},
-    "random_forest": {"model": "random_forest"},
-    "local_trees_w5": {"model": "local_trees", "model_options": {"window": 5}},
-    "local_trees_w10": {"model": "local_trees", "model_options": {"window": 10}},
-    "local_trees_w15": {"model": "local_trees", "model_options": {"window": 15}},
+    "linear+smooth": {"model": "linear", "correction": "smooth"},
+    "linear+atpk": {"model": "linear", "correction": "atpk"},
+    "random_forest+smooth": {"model": "random_forest", "correction": "smooth"},
+    "local_trees+block": {"model": "local_trees", "correction": "block"},
+    "local_trees+smooth": {"model": "local_trees", "correction": "smooth"},
+    "local_trees+atpk": {"model": "local_trees", "correction": "atpk"},
 }
 BLOCK = 5
+# Comma-separated subset of MODELS to evaluate (default: all).
+SELECTED = [name for name in os.getenv("VALIDATION_MODELS", "").split(",") if name]
 
 
 def landsat_scores(result, downscaled) -> list[dict]:
@@ -109,6 +112,8 @@ def main() -> int:
     result = cc.AnalysisWorkflow(request).execute(WORK, max_workers=1)
     report: dict = {"city": CITY, "period": [START, END], "scenes": int(result.cube.sizes["time"]), "probed_out": len(result.provenance.get("probed_out", [])), "models": {}}
     for label, spec in MODELS.items():
+        if SELECTED and label not in SELECTED:
+            continue
         logging.info("evaluating %s", label)
         downscaled = cc.downscale_per_scene(result.cube, result.predictors["sentinel2"], terrain=result.terrain, **spec)
         report["models"][label] = {"landsat": landsat_scores(result, downscaled), "holdout_rmse": holdout_rmse(result, spec)}
@@ -117,14 +122,14 @@ def main() -> int:
     (OUTPUT / "results.json").write_text(json.dumps(report, indent=2, default=str))
 
     print(f"\n{CITY} {START}..{END}: {report['scenes']} scenes, {report['probed_out']} rejected by the cloud probe")
-    print(f"{'model':18s} {'holdout':>8s}   Landsat: downscaled vs repeated 1 km (rmse | r | pattern rmse)")
+    print(f"{'model':22s} {'holdout':>8s}   Landsat: downscaled vs repeated 1 km (rmse | r | pattern rmse)")
     for label, scores in report["models"].items():
         pairs = {}
         for row in scores["landsat"]:
             pairs.setdefault(row["landsat"], {})[row["estimate"]] = row
         cells = [f"{d['downscaled']['rmse']:.2f}/{d['repeated_1km']['rmse']:.2f} | {d['downscaled']['correlation']:.2f}/{d['repeated_1km']['correlation']:.2f} | {d['downscaled']['pattern_rmse']:.2f}/{d['repeated_1km']['pattern_rmse']:.2f}"
                  for d in pairs.values() if {"downscaled", "repeated_1km"} <= set(d)]
-        print(f"{label:18s} {scores['holdout_rmse']:8.2f}   " + ("; ".join(cells) or "no same-morning Landsat scene"))
+        print(f"{label:22s} {scores['holdout_rmse']:8.2f}   " + ("; ".join(cells) or "no same-morning Landsat scene"))
     return 0
 
 
