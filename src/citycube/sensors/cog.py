@@ -21,6 +21,18 @@ from ..stac import STACItem
 
 _RESAMPLING = ("nearest", "bilinear", "average")
 
+# GDAL waits forever on a stalled connection by default: a single hung read
+# of a Planetary Computer COG froze a whole run for half an hour. With these
+# limits a stall fails within about a minute and is retried below.
+GDAL_HTTP_OPTIONS = {
+    "GDAL_HTTP_MAX_RETRY": "4",
+    "GDAL_HTTP_RETRY_DELAY": "2",
+    "GDAL_HTTP_CONNECTTIMEOUT": "20",
+    "GDAL_HTTP_TIMEOUT": "120",
+    "GDAL_HTTP_LOW_SPEED_TIME": "30",
+    "GDAL_HTTP_LOW_SPEED_LIMIT": "1024",
+}
+
 
 def sign_href(href: str) -> str:
     """Sign Planetary Computer blob URLs; return any other href unchanged."""
@@ -76,7 +88,7 @@ def read_cog_to_grid(
             # re-opens the dataset, which survives a dropped connection.
             level = _overview_level(href, grid) if use_overviews else None
             open_kwargs = {"overview_level": level} if level is not None else {}
-            with rasterio.Env(GDAL_HTTP_MAX_RETRY="4", GDAL_HTTP_RETRY_DELAY="2"), rasterio.open(href, **open_kwargs) as source:
+            with rasterio.Env(**GDAL_HTTP_OPTIONS), rasterio.open(href, **open_kwargs) as source:
                 source_nodata = nodata if nodata is not None else source.nodata
                 with WarpedVRT(
                     source,
@@ -102,7 +114,7 @@ def _overview_level(href: str, grid: AnalysisGrid) -> int | None:
 
     import rasterio
 
-    with rasterio.open(href) as source:
+    with rasterio.Env(**GDAL_HTTP_OPTIONS), rasterio.open(href) as source:
         if source.crs is None or not source.crs.is_projected:
             return None
         resolution = abs(source.res[0])

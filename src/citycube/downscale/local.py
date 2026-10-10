@@ -39,6 +39,23 @@ LEAF_EXTRAPOLATION_RATIO = 0.25
 WINDOW_EXTENSION = 0.25
 
 
+def _weighted_ridge(X: np.ndarray, y: np.ndarray, w: np.ndarray, alpha: float = 1.0) -> tuple[np.ndarray, float]:
+    """Coefficients and intercept of a weighted ridge regression (as scikit-learn's ``Ridge``).
+
+    Solved in closed form: a leaf has a few dozen samples and a handful of
+    predictors, and building thousands of estimator objects per scene cost
+    more than the arithmetic.
+    """
+
+    total = w.sum()
+    x_mean = (w[:, None] * X).sum(axis=0) / total
+    y_mean = float((w * y).sum() / total)
+    Xc, yc = X - x_mean, y - y_mean
+    gram = (Xc * w[:, None]).T @ Xc + alpha * np.eye(X.shape[1])
+    coef = np.linalg.solve(gram, (Xc * w[:, None]).T @ yc)
+    return coef, y_mean - float(x_mean @ coef)
+
+
 class LinearLeafTreeEnsemble:
     """Bagged regression trees with a ridge regression in every leaf."""
 
@@ -47,10 +64,11 @@ class LinearLeafTreeEnsemble:
         self.n_estimators = n_estimators
         self.min_samples_leaf = min_samples_leaf
         self.random_state = random_state
-        self.members: list[tuple[Any, dict[int, tuple[Any, float, float]]]] = []
+        # Per member: the tree and, indexed by tree node id, each leaf's
+        # coefficients, intercept, clip range and whether it has a regression.
+        self.members: list[tuple[Any, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
 
     def fit(self, X: np.ndarray, y: np.ndarray, sample_weight: np.ndarray | None = None) -> "LinearLeafTreeEnsemble":
-        from sklearn.linear_model import Ridge
         from sklearn.tree import DecisionTreeRegressor
 
         rng = np.random.default_rng(self.random_state)
@@ -61,29 +79,33 @@ class LinearLeafTreeEnsemble:
             Xs, ys, ws = X[sample], y[sample], weights[sample]
             tree = DecisionTreeRegressor(max_leaf_nodes=self.max_leaf_nodes, min_samples_leaf=min(self.min_samples_leaf, max(1, len(y) // 4)), random_state=self.random_state + member)
             tree.fit(Xs, ys, sample_weight=ws)
-            leaves: dict[int, tuple[Any, float, float]] = {}
+            nodes = tree.tree_.node_count
+            coefs = np.zeros((nodes, X.shape[1]))
+            intercepts = np.zeros(nodes)
+            low = np.full(nodes, -np.inf)
+            high = np.full(nodes, np.inf)
+            has_regression = np.zeros(nodes, dtype=bool)
             assigned = tree.apply(Xs)
             for leaf in np.unique(assigned):
                 in_leaf = assigned == leaf
-                low, high = float(ys[in_leaf].min()), float(ys[in_leaf].max())
-                margin = LEAF_EXTRAPOLATION_RATIO * (high - low)
-                regression = Ridge(alpha=1.0).fit(Xs[in_leaf], ys[in_leaf], sample_weight=ws[in_leaf]) if in_leaf.sum() > X.shape[1] + 1 else None
-                leaves[int(leaf)] = (regression, low - margin, high + margin)
-            self.members.append((tree, leaves))
+                lowest, highest = float(ys[in_leaf].min()), float(ys[in_leaf].max())
+                margin = LEAF_EXTRAPOLATION_RATIO * (highest - lowest)
+                low[leaf], high[leaf] = lowest - margin, highest + margin
+                if in_leaf.sum() > X.shape[1] + 1 and ws[in_leaf].sum() > 0:
+                    coefs[leaf], intercepts[leaf] = _weighted_ridge(Xs[in_leaf], ys[in_leaf], ws[in_leaf])
+                    has_regression[leaf] = True
+            self.members.append((tree, coefs, intercepts, low, high, has_regression))
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         if not self.members:
             raise RuntimeError("fit the ensemble before predicting")
         total = np.zeros(len(X))
-        for tree, leaves in self.members:
-            assigned = tree.apply(X)
-            values = tree.predict(X)  # leaf mean where a leaf has no regression
-            for leaf, (regression, low, high) in leaves.items():
-                in_leaf = assigned == leaf
-                if regression is not None and in_leaf.any():
-                    values[in_leaf] = np.clip(regression.predict(X[in_leaf]), low, high)
-            total += values
+        for tree, coefs, intercepts, low, high, has_regression in self.members:
+            leaf = tree.apply(X)
+            linear = np.einsum("ij,ij->i", X, coefs[leaf]) + intercepts[leaf]
+            # Leaves without a regression predict their mean.
+            total += np.where(has_regression[leaf], np.clip(linear, low[leaf], high[leaf]), tree.predict(X))
         return total / len(self.members)
 
 
