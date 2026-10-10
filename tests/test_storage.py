@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisRequest, ProductRef, grid_s5p, read_s5p_l2
-from sentinel_analysis.sensors.sentinel5p import Sentinel5PReadConfig, deduplicate_orbits
-from sentinel_analysis.workflow.adapters import AcquisitionContext
+from citycube import AOI, AnalysisRequest, ProductRef, grid_s5p, read_s5p_l2
+from citycube.sensors.sentinel5p import Sentinel5PReadConfig, deduplicate_orbits
+from citycube.workflow.adapters import AcquisitionContext
 
 
 def _ref(name: str, product_id: str = "id-1") -> ProductRef:
@@ -81,8 +81,8 @@ def test_sentinel5p_aoi_crop_reads_the_requested_gas_and_is_storable(tmp_path):
 def test_sentinel3_adapter_downloads_partially_grids_and_reuses_the_subset(tmp_path):
     import shutil
 
-    from sentinel_analysis import AnalysisGrid
-    from sentinel_analysis.workflow.adapters import Sentinel3Adapter
+    from citycube import AnalysisGrid
+    from citycube.workflow.adapters import Sentinel3Adapter
     from test_sentinel3_reader import NAME, _write_product
 
     source = _write_product(tmp_path / "source", rows=8, columns=32)

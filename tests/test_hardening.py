@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisRequest, AnalysisWorkflow, DownscaleSpec, downscale_per_scene, filter_overpass, local_solar_hour
-from sentinel_analysis.catalog import ProductRef
-from sentinel_analysis.cube import AnalysisGrid
-from sentinel_analysis.workflow import ProductAcquisitionError, RequestLimits, RequestTooLargeError, check_request, estimate_request
-from sentinel_analysis.workflow.adapters import AcquisitionContext
+from citycube import AOI, AnalysisRequest, AnalysisWorkflow, DownscaleSpec, downscale_per_scene, filter_overpass, local_solar_hour
+from citycube.catalog import ProductRef
+from citycube.cube import AnalysisGrid
+from citycube.workflow import ProductAcquisitionError, RequestLimits, RequestTooLargeError, check_request, estimate_request
+from citycube.workflow.adapters import AcquisitionContext
 
 CRS = "EPSG:32633"
 
@@ -59,7 +59,7 @@ def test_discovery_filters_night_passes_before_ranking(monkeypatch):
         _product("day-cloudy", "2025-06-10T09:30:00Z", cloud=50.0),
         _product("day-clear", "2025-06-11T09:30:00Z", cloud=5.0),
     ]
-    from sentinel_analysis.workflow import runner
+    from citycube.workflow import runner
 
     class FakeAdapter:
         def search(self, request, *, limit):
@@ -111,7 +111,7 @@ def test_map_products_fails_when_every_product_fails(tmp_path):
 
 
 def test_execute_reports_skipped_products_in_provenance(tmp_path, monkeypatch):
-    from sentinel_analysis.workflow import runner
+    from citycube.workflow import runner
 
     class FlakyAdapter:
         def search(self, request, *, limit):
@@ -165,7 +165,7 @@ def test_check_request_lists_every_exceeded_limit():
 
 
 def test_execute_rejects_an_oversized_request_before_any_download(tmp_path, monkeypatch):
-    from sentinel_analysis.workflow import runner
+    from citycube.workflow import runner
 
     monkeypatch.setattr(runner.AnalysisWorkflow, "discover", lambda self: pytest.fail("discovery must not run"))
 
@@ -313,7 +313,7 @@ def test_experimental_sentinel1_backends_warn_but_are_accepted():
 
 
 def test_provenance_records_the_software_version_and_commit(monkeypatch):
-    from sentinel_analysis import version
+    from citycube import version
 
     version.build_info.cache_clear()
     monkeypatch.setenv(version.COMMIT_ENV, "abc123")
@@ -333,7 +333,7 @@ def test_credential_checks_report_expiry_and_never_raise(monkeypatch):
 
     import requests
 
-    from sentinel_analysis import credentials
+    from citycube import credentials
 
     def jwt(expires: datetime) -> str:
         payload = base64.urlsafe_b64encode(json_module.dumps({"exp": int(expires.timestamp())}).encode()).decode().rstrip("=")
@@ -376,7 +376,7 @@ def test_credential_checks_report_expiry_and_never_raise(monkeypatch):
 
 
 def test_cams_forecast_requests_two_runs_with_short_leads_only():
-    from sentinel_analysis import CAMSConfig, CAMSProvider
+    from citycube import CAMSConfig, CAMSProvider
 
     provider = CAMSProvider(CAMSConfig(dataset="cams-global-atmospheric-composition-forecasts"))
     request = provider.build_request(AOI(13.2, 52.4, 13.6, 52.6), "2026-08-01", "2026-08-02", variables=("NO2",))
@@ -387,7 +387,7 @@ def test_cams_forecast_requests_two_runs_with_short_leads_only():
 
 
 def test_forecast_axes_become_one_time_axis_keeping_the_freshest_forecast():
-    from sentinel_analysis.providers.base import forecast_to_time
+    from citycube.providers.base import forecast_to_time
 
     runs = np.array(["2026-08-01T00", "2026-08-01T12"], dtype="datetime64[ns]")
     leads = np.array([0, 3, 6, 9, 12, 15], dtype="timedelta64[h]").astype("timedelta64[ns]")
@@ -410,7 +410,7 @@ def test_forecast_axes_become_one_time_axis_keeping_the_freshest_forecast():
 
 
 def test_write_netcdf_coerces_attributes_netcdf_cannot_store(tmp_path):
-    from sentinel_analysis import write_netcdf
+    from citycube import write_netcdf
 
     cube = _coarse_scene(np.datetime64("2025-06-10T10:00", "ns"))
     cube.attrs.update({"flag": True, "nothing": None, "skipped": ["a", "b"], "counts": [1, 2], "bools": [True, False]})
@@ -427,8 +427,8 @@ def test_write_netcdf_coerces_attributes_netcdf_cannot_store(tmp_path):
 
 
 def test_sentinel1_indices_keep_the_metadata_contract_the_fusion_step_validates():
-    from sentinel_analysis.metadata import validate_variable_contract
-    from sentinel_analysis.sensors.sentinel1 import sentinel1_indices
+    from citycube.metadata import validate_variable_contract
+    from citycube.sensors.sentinel1 import sentinel1_indices
 
     attrs = {"units": "linear", "sensor": "Sentinel-1", "product": "sentinel-1-rtc", "aggregation_method": "mean", "standard_name": "surface_backwards_scattering_coefficient_of_radar_wave"}
     band = np.full((1, 2, 2), 0.05)
@@ -447,7 +447,7 @@ def test_sentinel1_indices_keep_the_metadata_contract_the_fusion_step_validates(
 def test_hourly_auxiliary_data_does_not_inflate_the_predictors():
     # An outer time join with hourly ERA5 used to stretch every Sentinel-2
     # variable to 24 steps a day: a 0.1 GB request needed over 6 GB.
-    from sentinel_analysis import AuxiliarySpec
+    from citycube import AuxiliarySpec
 
     times = [np.datetime64("2025-06-10T10:00", "ns"), np.datetime64("2025-06-11T10:00", "ns")]
     thermal = xr.concat([_coarse_scene(t, seed=i)[["lst"]] for i, t in enumerate(times)], dim="time")
@@ -468,7 +468,7 @@ def test_hourly_auxiliary_data_does_not_inflate_the_predictors():
 
 
 def test_estimate_counts_hourly_auxiliary_sources():
-    from sentinel_analysis import AuxiliarySpec
+    from citycube import AuxiliarySpec
 
     plain = _gridded_request(100, max_products_per_sensor=10)
     with_era5 = dataclasses.replace(plain, auxiliary=(AuxiliarySpec("era5", variables=("air_temperature_2m", "boundary_layer_height")),))
@@ -479,7 +479,7 @@ def test_estimate_counts_hourly_auxiliary_sources():
 
 def test_zarr_round_trips_microsecond_times_and_gaps_exactly(tmp_path):
     pytest.importorskip("zarr")
-    from sentinel_analysis import open_zarr, write_netcdf, write_zarr
+    from citycube import open_zarr, write_netcdf, write_zarr
 
     times = np.array(["2026-08-09T08:57:17.033925", "2026-08-10T09:00:00.000001"], dtype="datetime64[ns]")
     matched = np.array(["2026-08-09T10:15:59.024000", "NaT"], dtype="datetime64[ns]")  # no match on day two
@@ -497,7 +497,7 @@ def test_zarr_round_trips_microsecond_times_and_gaps_exactly(tmp_path):
 
 
 def test_sentinel5p_pixels_fill_their_footprint_not_just_one_cell():
-    from sentinel_analysis import grid_s5p
+    from citycube import grid_s5p
 
     # Two TROPOMI-sized pixels (5.5 x 3.5 km) over a 0.01 degree (~1 km) grid.
     swath = xr.Dataset(
@@ -561,7 +561,7 @@ def test_unobserved_coarse_cells_are_masked_unless_asked_to_fill():
 
 
 def test_era5_land_rejects_boundary_layer_height_before_queueing(tmp_path):
-    from sentinel_analysis import AuxiliarySpec, ERA5Provider
+    from citycube import AuxiliarySpec, ERA5Provider
 
     with pytest.raises(ValueError, match="reanalysis-era5-single-levels"):
         ERA5Provider().download(AOI(13.2, 52.4, 13.6, 52.6), "2026-08-01", "2026-08-02", AuxiliarySpec("era5", variables=("boundary_layer_height",)), tmp_path)
@@ -570,7 +570,7 @@ def test_era5_land_rejects_boundary_layer_height_before_queueing(tmp_path):
 def test_a_single_row_coarse_source_still_regrids_onto_the_aoi():
     # A city-sized AOI can fall inside one 0.25 degree ERA5 row.
     pytest.importorskip("rasterio")
-    from sentinel_analysis.workflow.adapters import to_grid
+    from citycube.workflow.adapters import to_grid
 
     era5 = xr.Dataset(
         {"air_temperature_2m": (("time", "y", "x"), [[[290.0, 292.0]]])},
@@ -588,7 +588,7 @@ def test_a_single_row_coarse_source_still_regrids_onto_the_aoi():
 
 
 def test_station_collocation_matches_nearest_time_and_reports_unusable_stations():
-    from sentinel_analysis import collocate_stations
+    from citycube import collocate_stations
 
     cube = xr.Dataset(
         {"no2": (("time", "y", "x"), np.array([[[20.0, 30.0]], [[25.0, 35.0]]]))},
@@ -610,7 +610,7 @@ def test_station_collocation_matches_nearest_time_and_reports_unusable_stations(
 
 
 def test_products_without_cloud_cover_are_sampled_across_the_whole_period():
-    from sentinel_analysis import select_product_refs
+    from citycube import select_product_refs
 
     radar = [
         ProductRef(product_id=f"p{day:02d}", name=f"S1_{day:02d}", product_type="GRD", start_datetime=f"2026-08-{day:02d}T05:00:00Z",
@@ -657,9 +657,9 @@ _THREADED_NETCDF_SCRIPT = """
 import sys
 from pathlib import Path
 import numpy as np, xarray as xr
-from sentinel_analysis import AOI, AnalysisRequest
-from sentinel_analysis.catalog import ProductRef
-from sentinel_analysis.workflow.adapters import AcquisitionContext, _locked_read
+from citycube import AOI, AnalysisRequest
+from citycube.catalog import ProductRef
+from citycube.workflow.adapters import AcquisitionContext, _locked_read
 
 work = Path(sys.argv[1])
 rng = np.random.default_rng(0)
@@ -695,7 +695,7 @@ def test_threaded_netcdf_reads_and_writes_do_not_crash_the_process(tmp_path):
 
 
 def test_masks_stay_boolean_when_a_source_misses_some_times():
-    from sentinel_analysis import TemporalMatch, align_features
+    from citycube import TemporalMatch, align_features
 
     target = xr.Dataset({"lst": (("time", "y", "x"), np.ones((2, 1, 1)))},
                         coords={"time": np.array(["2026-08-01", "2026-08-10"], dtype="datetime64[ns]"), "y": [0.0], "x": [0.0]}, attrs={"crs": CRS})
@@ -727,7 +727,7 @@ def test_downscaling_streams_scenes_to_a_store_and_reads_static_terrain(tmp_path
 
 
 def test_aoi_coverage_comes_from_footprints_and_unions_tiles_of_one_pass():
-    from sentinel_analysis.catalog import annotate_aoi_coverage
+    from citycube.catalog import annotate_aoi_coverage
 
     aoi = AOI(13.0, 52.0, 14.0, 53.0)
 
@@ -750,7 +750,7 @@ def test_aoi_coverage_comes_from_footprints_and_unions_tiles_of_one_pass():
 
 
 def test_discovery_drops_products_that_barely_touch_the_aoi(monkeypatch):
-    from sentinel_analysis.workflow import runner
+    from citycube.workflow import runner
 
     def product(name, west, east, cloud):
         geometry = {"type": "Polygon", "coordinates": [[[west, 52.0], [east, 52.0], [east, 53.0], [west, 53.0], [west, 52.0]]]}
@@ -787,7 +787,7 @@ def _probe_files(root: Path, *, cloudy_rows: int) -> Path:
 
 
 def test_aoi_clear_fraction_uses_the_bayesian_mask_inside_the_aoi_only(tmp_path):
-    from sentinel_analysis.sensors.sentinel3.reader import aoi_clear_fraction
+    from citycube.sensors.sentinel3.reader import aoi_clear_fraction
 
     root = _probe_files(tmp_path / "p", cloudy_rows=3)
 
@@ -797,8 +797,8 @@ def test_aoi_clear_fraction_uses_the_bayesian_mask_inside_the_aoi_only(tmp_path)
 
 
 def test_cloud_probe_skips_clouded_products_and_fills_the_quota_from_spares(tmp_path):
-    from sentinel_analysis.sensors.sentinel3.reader import SLSTR_PROBE_FILES
-    from sentinel_analysis.workflow.adapters import AcquisitionContext, Sentinel3Adapter
+    from citycube.sensors.sentinel3.reader import SLSTR_PROBE_FILES
+    from citycube.workflow.adapters import AcquisitionContext, Sentinel3Adapter
 
     clouded_rows = {"a": 9, "b": 0, "c": 8, "d": 1, "e": 0}
 
@@ -822,7 +822,7 @@ def test_cloud_probe_skips_clouded_products_and_fills_the_quota_from_spares(tmp_
 
 def test_cloud_probe_judges_cached_subsets_by_their_own_clouds(tmp_path):
     # A cached subset used to be accepted unprobed, so a rerun kept fully clouded scenes.
-    from sentinel_analysis.workflow.adapters import AcquisitionContext, Sentinel3Adapter
+    from citycube.workflow.adapters import AcquisitionContext, Sentinel3Adapter
 
     class NoDownloads:
         def download_files(self, reference, names, output):
@@ -852,7 +852,7 @@ def test_cloud_probe_judges_cached_subsets_by_their_own_clouds(tmp_path):
 
 def test_probe_counts_only_pixels_within_the_view_angle_cut(tmp_path):
     # A clear scene seen at 58 degrees is all rejected later by the quality screening.
-    from sentinel_analysis.sensors.sentinel3.reader import aoi_clear_fraction, subset_clear_fraction
+    from citycube.sensors.sentinel3.reader import aoi_clear_fraction, subset_clear_fraction
 
     root = _probe_files(tmp_path / "p", cloudy_rows=0)
     with xr.open_dataset(root / "geodetic_in.nc") as geodetic:
@@ -896,7 +896,7 @@ def _two_regime_scene(time):
 
 def test_local_windows_recover_relations_a_global_model_cannot():
     pytest.importorskip("sklearn")
-    from sentinel_analysis import fit_local_window_downscaler
+    from citycube import fit_local_window_downscaler
 
     time = np.datetime64("2025-06-10T10:00", "ns")
     coarse, fine, truth = _two_regime_scene(time)
@@ -928,7 +928,7 @@ def test_local_trees_run_per_scene_and_conserve_the_coarse_observation():
 
 def test_linear_leaf_ensemble_does_not_extrapolate_without_limit():
     pytest.importorskip("sklearn")
-    from sentinel_analysis.downscale.local import LinearLeafTreeEnsemble
+    from citycube.downscale.local import LinearLeafTreeEnsemble
 
     X = np.linspace(0, 1, 200)[:, None]
     y = 10 + 5 * X[:, 0]
@@ -940,7 +940,7 @@ def test_linear_leaf_ensemble_does_not_extrapolate_without_limit():
 
 def test_reaggregation_accepts_spatially_chunked_stores():
     # Workflow results are opened lazily from Zarr, often tiled in y and x.
-    from sentinel_analysis import reaggregate_to_target
+    from citycube import reaggregate_to_target
 
     x = np.arange(40) * 100.0 + 50
     coarse_x = np.arange(4) * 1000.0 + 500

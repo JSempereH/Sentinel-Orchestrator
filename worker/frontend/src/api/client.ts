@@ -53,7 +53,7 @@ export interface JobRequest {
   downscale?: DownscaleSpec | null;
 }
 
-// Mirrors sentinel_analysis.downscale.DownscaleSpec.
+// Mirrors citycube.downscale.DownscaleSpec.
 export interface DownscaleSpec {
   model?: "linear" | "random_forest" | "xgboost" | "local_trees";
   predictors?: string[];

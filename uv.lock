@@ -636,6 +636,130 @@ wheels = [
 ]
 
 [[package]]
+name = "citycube"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "affine" },
+    { name = "netcdf4" },
+    { name = "numpy" },
+    { name = "openeo" },
+    { name = "pyproj" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "shapely" },
+    { name = "xarray" },
+]
+
+[package.optional-dependencies]
+auxiliary = [
+    { name = "cdsapi" },
+]
+cdse = [
+    { name = "eodag" },
+]
+cloud = [
+    { name = "dask", extra = ["array"] },
+    { name = "zarr" },
+]
+dev = [
+    { name = "mypy" },
+    { name = "pyresample" },
+    { name = "pytest" },
+    { name = "ruff" },
+]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+]
+ecostress = [
+    { name = "rasterio" },
+]
+geo = [
+    { name = "shapely" },
+]
+hyp3 = [
+    { name = "hyp3-sdk" },
+    { name = "pyproj" },
+    { name = "rasterio" },
+]
+landsat = [
+    { name = "planetary-computer" },
+    { name = "rasterio" },
+]
+ml = [
+    { name = "scikit-learn" },
+    { name = "xgboost" },
+]
+notebook = [
+    { name = "ipykernel" },
+    { name = "ipywidgets" },
+    { name = "jupyterlab" },
+    { name = "matplotlib" },
+    { name = "nbconvert" },
+    { name = "pillow" },
+]
+odc = [
+    { name = "odc-geo" },
+]
+optical = [
+    { name = "pyproj" },
+    { name = "rasterio" },
+]
+s1ard = [
+    { name = "s1ard" },
+]
+sar = [
+    { name = "pyproj" },
+    { name = "rasterio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "affine", specifier = ">=2.4.0" },
+    { name = "cdsapi", marker = "extra == 'auxiliary'", specifier = ">=0.7.7" },
+    { name = "dask", extras = ["array"], marker = "extra == 'cloud'", specifier = ">=2025.1.0" },
+    { name = "eodag", marker = "extra == 'cdse'", specifier = ">=4.6.0" },
+    { name = "hyp3-sdk", marker = "extra == 'hyp3'", specifier = ">=7.7.7" },
+    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=6.29.0" },
+    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.1.0" },
+    { name = "jupyterlab", marker = "extra == 'notebook'", specifier = ">=4.4.0" },
+    { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.9.0" },
+    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6,<2" },
+    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
+    { name = "nbconvert", marker = "extra == 'notebook'", specifier = ">=7.16.0" },
+    { name = "netcdf4", specifier = ">=1.7.0" },
+    { name = "numpy", specifier = ">=2.0.0" },
+    { name = "odc-geo", marker = "extra == 'odc'", specifier = ">=0.4.0" },
+    { name = "openeo", specifier = ">=0.50.0" },
+    { name = "pillow", marker = "extra == 'notebook'", specifier = ">=11.0.0" },
+    { name = "planetary-computer", marker = "extra == 'landsat'", specifier = ">=1.0.0" },
+    { name = "pyproj", specifier = ">=3.7.0" },
+    { name = "pyproj", marker = "extra == 'hyp3'", specifier = ">=3.7.0" },
+    { name = "pyproj", marker = "extra == 'optical'", specifier = ">=3.7.0" },
+    { name = "pyproj", marker = "extra == 'sar'", specifier = ">=3.7.0" },
+    { name = "pyresample", marker = "extra == 'dev'", specifier = ">=1.30.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "rasterio", marker = "extra == 'ecostress'", specifier = ">=1.4.0" },
+    { name = "rasterio", marker = "extra == 'hyp3'", specifier = ">=1.4.0" },
+    { name = "rasterio", marker = "extra == 'landsat'", specifier = ">=1.4.0" },
+    { name = "rasterio", marker = "extra == 'optical'", specifier = ">=1.4.0" },
+    { name = "rasterio", marker = "extra == 'sar'", specifier = ">=1.4.0" },
+    { name = "requests", specifier = ">=2.32.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
+    { name = "s1ard", marker = "extra == 's1ard'", specifier = ">=2.12.0" },
+    { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.6.0" },
+    { name = "shapely", specifier = ">=2.0.0" },
+    { name = "shapely", marker = "extra == 'geo'", specifier = ">=2.0.0" },
+    { name = "xarray", specifier = ">=2025.1.0" },
+    { name = "xgboost", marker = "extra == 'ml'", specifier = ">=2.1.0" },
+    { name = "zarr", marker = "extra == 'cloud'", specifier = ">=3.0.0" },
+]
+provides-extras = ["cdse", "cloud", "dev", "auxiliary", "docs", "notebook", "optical", "sar", "s1ard", "geo", "landsat", "ecostress", "ml", "hyp3", "odc"]
+
+[[package]]
 name = "click"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4064,128 +4188,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/c5/f0/184b4b5f8d00f2a92
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1c/78/504fdd027da3b84ff1aecd9f6957e65f35134534ccc6da8628eb71e76d3f/send2trash-2.1.0-py3-none-any.whl", hash = "sha256:0da2f112e6d6bb22de6aa6daa7e144831a4febf2a87261451c4ad849fe9a873c", size = 17610, upload-time = "2026-01-14T06:27:35.218Z" },
 ]
-
-[[package]]
-name = "sentinel-analysis"
-version = "0.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "affine" },
-    { name = "netcdf4" },
-    { name = "numpy" },
-    { name = "openeo" },
-    { name = "pyproj" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "shapely" },
-    { name = "xarray" },
-]
-
-[package.optional-dependencies]
-auxiliary = [
-    { name = "cdsapi" },
-]
-cdse = [
-    { name = "eodag" },
-]
-cloud = [
-    { name = "dask", extra = ["array"] },
-    { name = "zarr" },
-]
-dev = [
-    { name = "mypy" },
-    { name = "pyresample" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-docs = [
-    { name = "mkdocs-material" },
-]
-ecostress = [
-    { name = "rasterio" },
-]
-geo = [
-    { name = "shapely" },
-]
-hyp3 = [
-    { name = "hyp3-sdk" },
-    { name = "pyproj" },
-    { name = "rasterio" },
-]
-landsat = [
-    { name = "planetary-computer" },
-    { name = "rasterio" },
-]
-ml = [
-    { name = "scikit-learn" },
-    { name = "xgboost" },
-]
-notebook = [
-    { name = "ipykernel" },
-    { name = "ipywidgets" },
-    { name = "jupyterlab" },
-    { name = "matplotlib" },
-    { name = "nbconvert" },
-    { name = "pillow" },
-]
-odc = [
-    { name = "odc-geo" },
-]
-optical = [
-    { name = "pyproj" },
-    { name = "rasterio" },
-]
-s1ard = [
-    { name = "s1ard" },
-]
-sar = [
-    { name = "pyproj" },
-    { name = "rasterio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "affine", specifier = ">=2.4.0" },
-    { name = "cdsapi", marker = "extra == 'auxiliary'", specifier = ">=0.7.7" },
-    { name = "dask", extras = ["array"], marker = "extra == 'cloud'", specifier = ">=2025.1.0" },
-    { name = "eodag", marker = "extra == 'cdse'", specifier = ">=4.6.0" },
-    { name = "hyp3-sdk", marker = "extra == 'hyp3'", specifier = ">=7.7.7" },
-    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=6.29.0" },
-    { name = "ipywidgets", marker = "extra == 'notebook'", specifier = ">=8.1.0" },
-    { name = "jupyterlab", marker = "extra == 'notebook'", specifier = ">=4.4.0" },
-    { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.9.0" },
-    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
-    { name = "nbconvert", marker = "extra == 'notebook'", specifier = ">=7.16.0" },
-    { name = "netcdf4", specifier = ">=1.7.0" },
-    { name = "numpy", specifier = ">=2.0.0" },
-    { name = "odc-geo", marker = "extra == 'odc'", specifier = ">=0.4.0" },
-    { name = "openeo", specifier = ">=0.50.0" },
-    { name = "pillow", marker = "extra == 'notebook'", specifier = ">=11.0.0" },
-    { name = "planetary-computer", marker = "extra == 'landsat'", specifier = ">=1.0.0" },
-    { name = "pyproj", specifier = ">=3.7.0" },
-    { name = "pyproj", marker = "extra == 'hyp3'", specifier = ">=3.7.0" },
-    { name = "pyproj", marker = "extra == 'optical'", specifier = ">=3.7.0" },
-    { name = "pyproj", marker = "extra == 'sar'", specifier = ">=3.7.0" },
-    { name = "pyresample", marker = "extra == 'dev'", specifier = ">=1.30.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "python-dotenv", specifier = ">=1.1.0" },
-    { name = "rasterio", marker = "extra == 'ecostress'", specifier = ">=1.4.0" },
-    { name = "rasterio", marker = "extra == 'hyp3'", specifier = ">=1.4.0" },
-    { name = "rasterio", marker = "extra == 'landsat'", specifier = ">=1.4.0" },
-    { name = "rasterio", marker = "extra == 'optical'", specifier = ">=1.4.0" },
-    { name = "rasterio", marker = "extra == 'sar'", specifier = ">=1.4.0" },
-    { name = "requests", specifier = ">=2.32.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
-    { name = "s1ard", marker = "extra == 's1ard'", specifier = ">=2.12.0" },
-    { name = "scikit-learn", marker = "extra == 'ml'", specifier = ">=1.6.0" },
-    { name = "shapely", specifier = ">=2.0.0" },
-    { name = "shapely", marker = "extra == 'geo'", specifier = ">=2.0.0" },
-    { name = "xarray", specifier = ">=2025.1.0" },
-    { name = "xgboost", marker = "extra == 'ml'", specifier = ">=2.1.0" },
-    { name = "zarr", marker = "extra == 'cloud'", specifier = ">=3.0.0" },
-]
-provides-extras = ["cdse", "cloud", "dev", "auxiliary", "docs", "notebook", "optical", "sar", "s1ard", "geo", "landsat", "ecostress", "ml", "hyp3", "odc"]
 
 [[package]]
 name = "shapely"

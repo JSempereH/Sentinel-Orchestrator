@@ -1,12 +1,17 @@
 # Changelog
 
-All notable changes to `sentinel_analysis` and the `worker/` service.
+All notable changes to `citycube` and the `worker/` service.
 Detailed evidence for each change (real runs, bugs found) is in
-`docs/history.md`; current limitations are in `docs/roadmap.md`.
+`dev/history.md`; current limitations are in `docs/limitations.md` and `dev/roadmap.md`.
 
 ## Unreleased
 
 ### Changed (breaking)
+- The package is renamed from `sentinel_analysis` to `citycube`
+  (`pip install citycube`, `import citycube as cc`, command line `citycube`).
+  The build-time commit variable is now `CITYCUBE_GIT_COMMIT`. It covers more
+  than Sentinel missions (Landsat, ECOSTRESS, ERA5, CAMS, OpenAQ, terrain), and
+  its core is the city or polygon cube.
 - `AnalysisResult.predictor_cube` is replaced by `AnalysisResult.predictors`, one
   fine-resolution cube per sensor on its own acquisition times
   (`predictors/<sensor>.zarr` on disk). The merged cube outer-joined every sensor's
@@ -44,8 +49,8 @@ Detailed evidence for each change (real runs, bugs found) is in
 - `on_product_error="skip"` (default): a product that fails to download or read is left
   out and listed in `provenance["failed_products"]` instead of aborting the run.
 - Request size estimate and limits (`estimate_request`, `RequestLimits`); `execute()`
-  rejects oversized requests before downloading; `sentinel-analysis plan` shows the estimate.
-- `check_credentials()` / `sentinel-analysis check-credentials`: live authentication
+  rejects oversized requests before downloading; `citycube plan` shows the estimate.
+- `check_credentials()` / `citycube check-credentials`: live authentication
   against CDSE, Earthdata (with token expiry), CDS, ADS and OpenAQ.
 - `scripts/canary.py` (`make canary`): daily smallest real end-to-end run for cron.
 - Every result's provenance records the package version and git commit (`build_info()`).

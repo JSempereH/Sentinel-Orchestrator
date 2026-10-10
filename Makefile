@@ -15,11 +15,11 @@ help: ## Show this help
 
 ## --- Setup -----------------------------------------------------------------
 
-install: ## Install everything: sentinel_analysis (uv) + sentinel-worker
+install: ## Install everything: citycube (uv) + citycube-worker
 	uv sync --extra dev --extra auxiliary --extra optical --extra docs
 	$(MAKE) install-worker
 
-install-worker: ## Create/refresh the sentinel-worker venv and install its deps
+install-worker: ## Create/refresh the citycube-worker venv and install its deps
 	@if [ ! -d $(WORKER_DIR)/.venv ]; then uv venv --python 3.12 $(WORKER_DIR)/.venv; fi
 	uv pip install --python $(WORKER_DIR)/.venv -r $(WORKER_DIR)/requirements.txt -r $(WORKER_DIR)/requirements-dev.txt
 	@# The `gdal` Python package (pulled in by the s1ard extra) has no
@@ -41,10 +41,10 @@ install-worker: ## Create/refresh the sentinel-worker venv and install its deps
 
 ## --- Run ---------------------------------------------------------------------
 
-worker: ## Run the sentinel-worker FastAPI service (:8100)
+worker: ## Run the citycube-worker FastAPI service (:8100)
 	cd $(WORKER_DIR) && .venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port $(WORKER_PORT) --timeout-keep-alive 30
 
-docs: ## Serve the sentinel_analysis docs locally with mkdocs (:8001)
+docs: ## Serve the citycube docs locally with mkdocs (:8001)
 	uv run --extra docs mkdocs serve --dev-addr 127.0.0.1:$(DOCS_PORT)
 
 docs-build: ## Build the static docs site into ./site
@@ -52,10 +52,10 @@ docs-build: ## Build the static docs site into ./site
 
 ## --- Tests ---------------------------------------------------------------
 
-test: ## Run sentinel_analysis test suite
-	uv run --extra dev --extra auxiliary --extra optical pytest -q
+test: ## Run citycube test suite
+	uv run --extra dev --extra auxiliary --extra optical --extra ml --extra landsat --extra ecostress --extra cdse --extra hyp3 --extra cloud --extra odc --extra geo pytest -q
 
-test-worker: ## Run the sentinel-worker test suite
+test-worker: ## Run the citycube-worker test suite
 	cd $(WORKER_DIR) && .venv/bin/pytest
 
 test-all: test test-worker ## Run every test suite in this repo
@@ -67,10 +67,10 @@ lint: ## Run ruff on this repo
 
 ## --- Docker (alternative to bare venvs; see docker-compose.yml) ------------
 
-docker-build: ## Build the sentinel-worker container image (records the current commit)
+docker-build: ## Build the citycube-worker container image (records the current commit)
 	GIT_COMMIT=$$(git rev-parse HEAD) docker compose build
 
-docker-up: ## Run the sentinel-worker in a container (:8100)
+docker-up: ## Run the citycube-worker in a container (:8100)
 	docker compose up
 
 docker-down: ## Stop and remove the container started by docker-up
@@ -82,7 +82,7 @@ lock-worker: ## Re-pin every worker/container dependency into worker/requirement
 	uv pip compile pyproject.toml $(WORKER_DIR)/requirements.txt --extra cdse --extra auxiliary --extra optical --extra sar --extra cloud --extra hyp3 --extra landsat --extra ecostress --extra ml --python-version 3.12 --python-platform x86_64-unknown-linux-gnu -o $(WORKER_DIR)/requirements.lock
 
 check-credentials: ## Authenticate against every configured data provider (exit 1 on failure)
-	uv run sentinel-analysis check-credentials
+	uv run citycube check-credentials
 
 canary: ## Smallest real end-to-end run (see scripts/canary.py); add ARGS=--full for Sentinel-2 + downscaling
 	uv run --extra cdse --extra optical --extra cloud --extra landsat --extra ml python scripts/canary.py $(ARGS)

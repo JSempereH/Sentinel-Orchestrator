@@ -1,4 +1,4 @@
-"""Benchmark every downscaling baseline in `sentinel_analysis.downscale` on
+"""Benchmark every downscaling baseline in `citycube.downscale` on
 one real, live-fetched Sentinel-3 LST + Sentinel-2 predictor cube over
 Berlin, per docs/downscaling.md's roadmap item 2 ("Benchmark OLS,
 TsHARP/DisTrad, Random Forest and optional XGBoost on blocked
@@ -61,7 +61,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-from sentinel_analysis import (  # noqa: E402
+from citycube import (  # noqa: E402
     AnalysisRequest,
     AnalysisWorkflow,
     ClientConfig,

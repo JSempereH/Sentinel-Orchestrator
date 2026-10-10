@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, LSTConfidenceFlag, QualityPolicy, apply_quality_mask, read_l2_lst
+from citycube import AOI, LSTConfidenceFlag, QualityPolicy, apply_quality_mask, read_l2_lst
 
 NAME = "S3A_SL_2_LST____20250610T090000_20250610T090300_20250611T000000_0179_000_000_0000_PS1_O_NT_005.SEN3"
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sentinel_analysis import (
+from citycube import (
     AnalysisRequest,
     AnalysisWorkflow,
     AuxiliarySpec,

@@ -1,7 +1,7 @@
 # Build context must be this repo's root, NOT worker/ - see docker-compose.yml
 # at that root, or build manually with:
-#   docker build -f worker/Dockerfile -t sentinel-worker .
-#   (run from Sentinel-Orchestrator/)
+#   docker build -f worker/Dockerfile -t citycube-worker .
+#   (run from the repository root)
 
 # ── Frontend build stage ─────────────────────────────────────────────────
 # Built separately so the final image needs no Node.js at all - only the
@@ -15,7 +15,7 @@ RUN npm run build
 
 FROM python:3.12-slim
 
-# rasterio/pyproj/xarray native deps for the sentinel_analysis[optical,sar] extras
+# rasterio/pyproj/xarray native deps for the citycube[optical,sar] extras
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin libgdal-dev g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -29,7 +29,7 @@ WORKDIR /app
 COPY worker/requirements.lock /app/worker/requirements.lock
 RUN pip install --no-cache-dir -r /app/worker/requirements.lock
 
-# sentinel_analysis itself (this repo). Neither `s1ard` (Sentinel-1 ARD,
+# citycube itself (this repo). Neither `s1ard` (Sentinel-1 ARD,
 # confirmed broken - see docs/roadmap.md) nor SNAP itself (a large Java
 # desktop application this Dockerfile does not attempt to bundle) is
 # installed here. `sentinel1_backend="snap"` (the default) needs a separate
@@ -50,7 +50,7 @@ WORKDIR /app/worker
 # Recorded in /health and in every result's provenance.json (there is no
 # .git inside the image). `make docker-build` passes the current commit.
 ARG GIT_COMMIT=unknown
-ENV SENTINEL_ANALYSIS_GIT_COMMIT=${GIT_COMMIT}
+ENV CITYCUBE_GIT_COMMIT=${GIT_COMMIT}
 
 # Run unprivileged. /data is created owned by that user before VOLUME so a
 # new named volume inherits the ownership.

@@ -52,7 +52,7 @@ function App() {
             </div>
             <div>
               <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>
-                Sentinel Worker
+                citycube worker
               </div>
               <div style={{ color: "#475569", fontSize: 11 }}>v0.1.0</div>
             </div>
@@ -97,7 +97,7 @@ function App() {
           </div>
 
           <div style={{ padding: "12px 16px", borderTop: "1px solid var(--sidebar-border)" }}>
-            <div style={{ fontSize: 11, color: "#334155" }}>sentinel_analysis</div>
+            <div style={{ fontSize: 11, color: "#334155" }}>citycube</div>
           </div>
         </nav>
 

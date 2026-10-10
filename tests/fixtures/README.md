@@ -1,7 +1,7 @@
 # Real Product Fixtures
 
 The repository does not commit satellite archives. To run the real-product
-integration tests, set `SENTINEL_ANALYSIS_RUN_INTEGRATION=1` and provide local
+integration tests, set `CITYCUBE_RUN_INTEGRATION=1` and provide local
 paths:
 
 ```bash

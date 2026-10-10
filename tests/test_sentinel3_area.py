@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AnalysisGrid
-from sentinel_analysis.sensors.sentinel3.georeference import grid_l2_lst
+from citycube import AnalysisGrid
+from citycube.sensors.sentinel3.georeference import grid_l2_lst
 
 pytest.importorskip("shapely")
 pyproj = pytest.importorskip("pyproj")
@@ -79,7 +79,7 @@ def test_area_gridding_only_builds_footprints_near_the_grid():
 
 
 def test_reader_masks_clouds_with_the_bayesian_flags_when_present(tmp_path):
-    from sentinel_analysis import apply_quality_mask, read_l2_lst
+    from citycube import apply_quality_mask, read_l2_lst
 
     product = tmp_path / "S3A_SL_2_LST____20250610T090000_20250610T090300_0000_000_000____LN2_D_NT_005.SEN3"
     product.mkdir()
@@ -102,7 +102,7 @@ def test_reader_masks_clouds_with_the_bayesian_flags_when_present(tmp_path):
 
     # The new flag variable must survive gridding and the metadata contract
     # that AnalysisWorkflow.run() enforces.
-    from sentinel_analysis.metadata import validate_variable_contract
+    from citycube.metadata import validate_variable_contract
 
     lat, lon = pyproj.Transformer.from_crs(CRS, "EPSG:4326", always_xy=True).transform(np.array([[500050.0, 500150.0, 500250.0]]), np.array([[2200050.0] * 3]))
     located = masked.assign(latitude=(("y", "x"), lat), longitude=(("y", "x"), lon))
@@ -143,7 +143,7 @@ def test_area_gridding_agrees_with_an_independent_resampler():
 
 
 def test_area_gridding_of_an_empty_aoi_crop_is_all_missing_not_a_crash():
-    from sentinel_analysis import apply_quality_mask
+    from citycube import apply_quality_mask
 
     grid = AnalysisGrid.from_bounds((500000, 2200000, 500400, 2200400), crs=CRS, resolution_m=100)
     empty = _swath(8, spacing=50.0, nan_fraction=0.0).isel(y=slice(0, 0), x=slice(0, 0))

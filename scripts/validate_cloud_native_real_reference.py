@@ -37,7 +37,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-from sentinel_analysis import (  # noqa: E402
+from citycube import (  # noqa: E402
     AnalysisGrid,
     Sentinel1RTCSTACCatalog,
     Sentinel2STACCatalog,
@@ -46,7 +46,7 @@ from sentinel_analysis import (  # noqa: E402
     read_s2_l2a,
     read_s2_l2a_cog,
 )
-from sentinel_analysis.workflow.adapters import to_grid  # noqa: E402
+from citycube.workflow.adapters import to_grid  # noqa: E402
 
 SAFE = Path(os.getenv(
     "CLOUD_NATIVE_VALIDATION_SAFE",

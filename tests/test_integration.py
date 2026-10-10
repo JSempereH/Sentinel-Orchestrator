@@ -1,6 +1,6 @@
 """Optional real-product integration tests.
 
-Run with ``SENTINEL_ANALYSIS_RUN_INTEGRATION=1`` and paths to local products.
+Run with ``CITYCUBE_RUN_INTEGRATION=1`` and paths to local products.
 The suite deliberately never downloads large satellite archives implicitly.
 """
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sentinel_analysis import (
+from citycube import (
     AnalysisGrid,
     Sentinel5PReadConfig,
     get_city,
@@ -31,8 +31,8 @@ pytestmark = pytest.mark.integration
 
 
 def _product(name: str) -> Path:
-    if os.getenv("SENTINEL_ANALYSIS_RUN_INTEGRATION") != "1":
-        pytest.skip("Set SENTINEL_ANALYSIS_RUN_INTEGRATION=1 to run real-product tests")
+    if os.getenv("CITYCUBE_RUN_INTEGRATION") != "1":
+        pytest.skip("Set CITYCUBE_RUN_INTEGRATION=1 to run real-product tests")
     value = os.getenv(name)
     if not value:
         pytest.skip(f"Set {name} to a local product path")
@@ -70,7 +70,7 @@ def test_real_sentinel2_l1c():
 
 def test_real_sentinel3_georeferencing():
     dataset = read_l2_lst(_product("SENTINEL3_SAFE_PATH"))
-    city = get_city(os.getenv("SENTINEL_ANALYSIS_CITY", "Berlin"))
+    city = get_city(os.getenv("CITYCUBE_CITY", "Berlin"))
     grid = AnalysisGrid.for_city(city, resolution_m=1000)
     result = grid_l2_lst(dataset, grid)
     assert result["lst_observation_count"].sum().item() > 0

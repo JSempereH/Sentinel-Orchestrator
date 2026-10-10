@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AnalysisGrid
-from sentinel_analysis.sensors.terrain import load_dem, slope_aspect, solar_position, terrain_predictors
-from sentinel_analysis.stac import STACItem
+from citycube import AnalysisGrid
+from citycube.sensors.terrain import load_dem, slope_aspect, solar_position, terrain_predictors
+from citycube.stac import STACItem
 
 pytest.importorskip("pyproj")
 CRS = "EPSG:32633"
@@ -80,7 +80,7 @@ def test_load_dem_mosaics_tiles_onto_the_grid(tmp_path):
 
 
 def test_workflow_run_adds_aggregated_terrain_and_illumination_predictors():
-    from sentinel_analysis import AOI, AnalysisRequest, AnalysisWorkflow
+    from citycube import AOI, AnalysisRequest, AnalysisWorkflow
 
     times = np.array(["2025-06-21T10:00", "2025-06-22T10:00"], dtype="datetime64[ns]")
     coarse = xr.Dataset(

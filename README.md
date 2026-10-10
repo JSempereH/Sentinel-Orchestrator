@@ -1,25 +1,17 @@
-![Sentinel Orchestrator](docs/assets/banner.svg)
+![citycube](docs/assets/banner.svg)
 
-[![CI](https://github.com/JSempereH/Sentinel-Orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/JSempereH/Sentinel-Orchestrator/actions/workflows/ci.yml)
+[![CI](https://github.com/JSempereH/citycube/actions/workflows/ci.yml/badge.svg)](https://github.com/JSempereH/citycube/actions/workflows/ci.yml)
 [![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![Docs](https://img.shields.io/badge/docs-jsempereh.github.io%2Fcitycube-blue.svg)](https://jsempereh.github.io/citycube/)
 
-`sentinel_analysis` turns an area of interest and a date range into
-analysis-ready, co-registered cubes: it discovers, downloads and harmonizes
-Sentinel-1/2/3/5P, Landsat 8/9, ECOSTRESS, ERA5, CAMS, OpenAQ and terrain
-data onto shared UTM grids, keeping provenance, units and quality masks
-explicit. Its focus is urban land-surface temperature: Sentinel-3 LST is the
-coarse target, Sentinel-2 indices and terrain are fine-scale predictors, and
-Landsat/ECOSTRESS act as independent thermal references. A downscaling
-stage sharpens LST from 1 km to ~100 m (per-scene OLS, Random Forest or
-XGBoost anchored to the observed scene; GWR, STARFM/ESTARFM and conformal
-intervals as building blocks), validated with blocked spatiotemporal
-holdouts. It runs as a library, a CLI, or a self-hosted single-user HTTP
-worker (`worker/`).
+`citycube` turns a city, or any polygon, and a date range into ready-to-use
+satellite data cubes: Sentinel-1/2/3/5P, Landsat, ECOSTRESS, weather and air
+quality on one grid and one time axis. It sharpens Sentinel-3 land surface
+temperature from 1 km to 100 m and summarises results per district. It runs
+as a Python library, a command line or a small web service.
 
-Current limitations and what is validated on real data versus
-synthetic-only are listed in [`docs/roadmap.md`](docs/roadmap.md) - worth
-reading before relying on any one model's numbers.
+Documentation: [jsempereh.github.io/citycube](https://jsempereh.github.io/citycube/)
 
 ---
 
@@ -58,15 +50,15 @@ to `output/e2e-smoke/`, which is ignored by Git.
 You can also inspect a request without downloading data:
 
 ```bash
-uv run sentinel-analysis plan request.json
-uv run sentinel-analysis discover request.json
-uv run sentinel-analysis auxiliary request.json output/auxiliary
+uv run citycube plan request.json
+uv run citycube discover request.json
+uv run citycube auxiliary request.json output/auxiliary
 ```
 
 And run a request end to end, writing the cubes as Zarr:
 
 ```bash
-uv run --extra optical --extra cloud sentinel-analysis run request.json output/run
+uv run --extra optical --extra cloud citycube run request.json output/run
 ```
 
 ---
@@ -74,7 +66,7 @@ uv run --extra optical --extra cloud sentinel-analysis run request.json output/r
 ## Architecture
 
 ```text
-src/sentinel_analysis/
+src/citycube/
   sensors/       Sentinel-1/2/3/5P, Landsat 8/9, and ECOSTRESS readers/catalogs
   providers/     ERA5, CAMS, and OpenAQ
   workflow/      requests, planning, per-sensor adapters, fusion, and results
@@ -88,7 +80,7 @@ Sentinel-1 has four interchangeable `sentinel1_backend` options -
 `"snap"` (default, local SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud
 processing, no SNAP needed; not yet run against a real submission),
 `"pc_rtc"` (Planetary Computer's pre-processed RTC COGs, read in place),
-and `"s1ard"` (pyroSAR NRB, currently broken - see `docs/roadmap.md`).
+and `"s1ard"` (pyroSAR NRB, currently broken - see `docs/limitations.md`).
 Sentinel-2 can likewise be read in place from STAC COGs with
 `sentinel2_source="stac_cog"` instead of downloading full SAFE archives.
 Both cloud-native options are validated against real scenes. Each sensor's search/acquisition lives in one adapter in
@@ -96,8 +88,8 @@ Both cloud-native options are validated against real scenes. Each sensor's searc
 references used as validation/predictors alongside Sentinel-3's own `lst`.
 `downscale/`'s models turn a coarse thermal field into a fine-resolution
 one using Sentinel-2 predictors - see
-[`docs/downscaling.md`](docs/downscaling.md) for what's validated on real
-data versus synthetic-only.
+[`docs/downscaling.md`](docs/downscaling.md) for how it works and how well
+it matches Landsat.
 
 A request can also keep only daytime thermal passes
 (`thermal_overpass="day"`), downscale every scene as a final workflow stage
@@ -107,12 +99,11 @@ listed in the result's provenance). `execute()` estimates the in-memory
 size of a request and rejects one that is too large before downloading
 anything. See [`docs/workflows.md`](docs/workflows.md).
 
-`sentinel_analysis` is the only current package name. `Sentinel3LST` is the
-local Sentinel-3 facade, while `Sentinel3LSTClient` is the remote openEO
-client. `sentinel3_lst` and `urban_heat` were historical prototype names and
-are not active source packages.
+`citycube` is the only current package name (it was `sentinel_analysis`
+until 2026-10-10). `Sentinel3LST` is the local Sentinel-3 facade, while
+`Sentinel3LSTClient` is the remote openEO client.
 
-### sentinel-worker
+### citycube-worker
 
 `worker/` wraps `AnalysisWorkflow.execute()` behind a small FastAPI service
 (`POST /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/result`) so a multisensor run
@@ -133,9 +124,9 @@ uv build
 Real-product tests are optional and never download files by themselves. See
 the complete guide in [`docs/`](docs/index.md).
 
-The scientific downscaling and multisensor-fusion roadmap, including guarded
-OpenAQ station interpolation, is documented in
-[`docs/downscaling.md`](docs/downscaling.md).
+The research behind the downscaling design, every benchmark run, and the
+guarded OpenAQ station interpolation are documented in
+[`dev/downscaling-research.md`](dev/downscaling-research.md).
 
 ---
 

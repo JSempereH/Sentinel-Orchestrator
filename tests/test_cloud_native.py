@@ -8,13 +8,13 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, ProductRef
-from sentinel_analysis.providers import AUXILIARY_PROVIDER_FACTORIES, AUXILIARY_PROVIDERS
-from sentinel_analysis.sensors.sentinel1 import Sentinel1RTCSTACCatalog, read_s1_rtc_cog
-from sentinel_analysis.sensors.sentinel2 import Sentinel2STACCatalog, read_s2_l2a_cog
-from sentinel_analysis.stac import STACItem
-from sentinel_analysis.workflow import adapters
-from sentinel_analysis.workflow.request import SUPPORTED_SENSORS
+from citycube import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, ProductRef
+from citycube.providers import AUXILIARY_PROVIDER_FACTORIES, AUXILIARY_PROVIDERS
+from citycube.sensors.sentinel1 import Sentinel1RTCSTACCatalog, read_s1_rtc_cog
+from citycube.sensors.sentinel2 import Sentinel2STACCatalog, read_s2_l2a_cog
+from citycube.stac import STACItem
+from citycube.workflow import adapters
+from citycube.workflow.request import SUPPORTED_SENSORS
 
 pytest.importorskip("rasterio")
 
@@ -170,7 +170,7 @@ def test_execute_drives_registered_adapters_and_fuses_their_cubes(tmp_path, monk
             return cube(self.variable, self.value)
 
     thermal, optical = FakeAdapter("sentinel3", "lst", 30.0), FakeAdapter("sentinel2", "NDVI", 0.5)
-    monkeypatch.setattr("sentinel_analysis.workflow.runner.SENSOR_ADAPTERS", {"sentinel3": thermal, "sentinel2": optical})
+    monkeypatch.setattr("citycube.workflow.runner.SENSOR_ADAPTERS", {"sentinel3": thermal, "sentinel2": optical})
     request = AnalysisRequest(aoi=AOI(0, 0, 1, 1), start="2025-06-10", end="2025-06-11", sensors=("sentinel3", "sentinel2"))
 
     result = AnalysisWorkflow(request).execute(tmp_path)
@@ -201,9 +201,9 @@ def test_cli_run_executes_and_saves_the_result(tmp_path, monkeypatch, capsys):
     pytest.importorskip("zarr")
     import json
 
-    from sentinel_analysis.cli import main
-    from sentinel_analysis.workflow.plan import build_plan
-    from sentinel_analysis.workflow.result import AnalysisResult
+    from citycube.cli import main
+    from citycube.workflow.plan import build_plan
+    from citycube.workflow.result import AnalysisResult
 
     request = AnalysisRequest(aoi=AOI(0, 0, 1, 1), start="2025-06-10", end="2025-06-11")
     request_path = request.save_json(tmp_path / "request.json")
@@ -246,7 +246,7 @@ def test_remote_cog_reads_are_retried_after_a_transient_failure(tmp_path, monkey
     import rasterio
     from rasterio.errors import RasterioIOError
 
-    from sentinel_analysis.sensors import cog
+    from citycube.sensors import cog
 
     local = _write_tif(tmp_path / "band.tif", np.full((4, 4), 7, dtype=np.uint16), nodata=0)
     real_open = rasterio.open

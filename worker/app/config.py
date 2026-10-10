@@ -1,10 +1,10 @@
 """
 Central worker configuration via pydantic-settings.
 
-Credentials for sentinel_analysis itself (CDSE, CDS/ADS, OpenAQ) are NOT
+Credentials for citycube itself (CDSE, CDS/ADS, OpenAQ) are NOT
 read here - they stay local to this machine and are read directly by
-sentinel_analysis.config.ClientConfig.from_env() / the auxiliary providers,
-exactly as when running the sentinel-analysis CLI by hand. This file only
+citycube.config.ClientConfig.from_env() / the auxiliary providers,
+exactly as when running the citycube CLI by hand. This file only
 configures the worker's own HTTP-facing behaviour.
 """
 
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Requests beyond these are rejected at submission (HTTP 422) instead of
     # failing mid-run or exhausting the machine's memory. The estimate is the
     # in-memory size of the prepared cubes (see
-    # sentinel_analysis.workflow.limits); peak RAM is up to about twice that.
+    # citycube.workflow.limits); peak RAM is up to about twice that.
     # 0 disables a limit.
     max_aoi_km2: float = 10000
     max_products_per_sensor: int = 100
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     log_format: Literal["text", "json"] = "text"
 
     # .env also carries CDSE/CDS/CAMS/OpenAQ credentials read directly by
-    # sentinel_analysis (see module docstring) - pydantic-settings must not
+    # citycube (see module docstring) - pydantic-settings must not
     # reject the file for containing fields this model doesn't define.
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

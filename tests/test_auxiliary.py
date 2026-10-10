@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, AuxiliarySpec, OpenAQInterpolationConfig
-from sentinel_analysis.providers.cams import CAMSProvider
-from sentinel_analysis.providers.era5 import ERA5Provider
-from sentinel_analysis.providers.openaq import OpenAQProvider
+from citycube import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, AuxiliarySpec, OpenAQInterpolationConfig
+from citycube.providers.cams import CAMSProvider
+from citycube.providers.era5 import ERA5Provider
+from citycube.providers.openaq import OpenAQProvider
 
 
 class _Response:
@@ -156,7 +156,7 @@ def test_workflow_merges_gridded_auxiliary_and_keeps_stations_separate():
     auxiliary = xr.Dataset(
         {"air_temperature_2m": (("time", "y", "x"), np.ones((1, 2, 2)) * 290.0, {"units": "K", "sensor": "era5", "product": "reanalysis-era5-land", "aggregation_method": "native"})},
         coords={"time": ["2025-06-01"], "y": [52.5, 52.4], "x": [13.3, 13.4]},
-        attrs={"crs": "EPSG:4326", "grid_id": "target", "metadata_contract": "sentinel-analysis-v1", "analysis_shape": "regular_grid"},
+        attrs={"crs": "EPSG:4326", "grid_id": "target", "metadata_contract": "citycube-v1", "analysis_shape": "regular_grid"},
     )
     stations = xr.Dataset(
         {"NO2": (("station", "time"), [[21.0]], {"units": "ug/m3", "sensor": "openaq", "product": "openaq-v3", "aggregation_method": "native"})},

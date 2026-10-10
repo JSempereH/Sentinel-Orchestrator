@@ -439,9 +439,9 @@ def _child_main(job_id: str, request_dict: dict, output_root: str, messages, run
 
     configure_job_logging(job_id, log_path(job_id))
     log = logging.getLogger(__name__)
-    from sentinel_analysis.version import build_info
+    from citycube.version import build_info
 
-    log.info("Job started (sentinel_analysis %s, commit %s)", build_info()["version"], build_info()["git_commit"])
+    log.info("Job started (citycube %s, commit %s)", build_info()["version"], build_info()["git_commit"])
 
     def metrics() -> dict[str, float]:
         # The larger of this process and any external tool it ran (SNAP's

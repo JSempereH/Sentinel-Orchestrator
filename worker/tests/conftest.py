@@ -7,7 +7,7 @@ real WORKER_OUTPUT_DIR or require a real WORKER_API_TOKEN.
 import os
 import tempfile
 
-_tmp_dir = tempfile.mkdtemp(prefix="sentinel-worker-test-")
+_tmp_dir = tempfile.mkdtemp(prefix="citycube-worker-test-")
 os.environ["WORKER_API_TOKEN"] = "test-token"
 os.environ["WORKER_OUTPUT_DIR"] = os.path.join(_tmp_dir, "runs")
 # Most tests monkeypatch execute_and_persist, which a spawned job process

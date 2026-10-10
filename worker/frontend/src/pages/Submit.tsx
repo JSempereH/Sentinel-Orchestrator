@@ -4,7 +4,7 @@ import { AxiosError } from "axios";
 import { AOIMap } from "../components/Map/AOIMap";
 import { jobsApi, type AOI, type AuxiliarySpec } from "../api/client";
 
-// Mirrors sentinel_analysis.workflow.request.SUPPORTED_SENSORS.
+// Mirrors citycube.workflow.request.SUPPORTED_SENSORS.
 const SENSORS = [
   { id: "sentinel1", label: "Sentinel-1 (radar)" },
   { id: "sentinel2", label: "Sentinel-2 (optical)" },
@@ -14,7 +14,7 @@ const SENSORS = [
   { id: "ecostress", label: "ECOSTRESS (thermal, ~70 m)" },
 ];
 
-// Mirrors sentinel_analysis.providers.base.AUXILIARY_PROVIDERS.
+// Mirrors citycube.providers.base.AUXILIARY_PROVIDERS.
 const AUX_PROVIDERS = [
   { id: "era5", label: "ERA5 (reanalysis meteorology)" },
   { id: "cams", label: "CAMS (atmospheric composition)" },
@@ -79,7 +79,7 @@ export function SubmitPage({ onSubmitted }: { onSubmitted: (jobId: string) => vo
     <div className="page">
       <h2 style={{ marginBottom: 4 }}>New analysis run</h2>
       <p style={{ margin: "0 0 24px", color: "var(--text-muted)", fontSize: 13 }}>
-        Draw an AOI, pick sensors and a date range, and submit to the sentinel-worker.
+        Draw an AOI, pick sensors and a date range, and submit to the citycube-worker.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>

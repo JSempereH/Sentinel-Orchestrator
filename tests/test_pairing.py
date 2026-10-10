@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from sentinel_analysis import ProductRef, TemporalPair, select_temporal_pair
+from citycube import ProductRef, TemporalPair, select_temporal_pair
 
 
 def _product(product_id: str, start: str, cloud_cover: float | None) -> ProductRef:

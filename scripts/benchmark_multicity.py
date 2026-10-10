@@ -78,8 +78,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-from sentinel_analysis.sensors.terrain import terrain_predictors  # noqa: E402
-from sentinel_analysis import (  # noqa: E402
+from citycube.sensors.terrain import terrain_predictors  # noqa: E402
+from citycube import (  # noqa: E402
     AnalysisRequest,
     AnalysisWorkflow,
     ClientConfig,
@@ -290,7 +290,7 @@ def scene_protocol(cube: xr.Dataset, predictor_cube: xr.Dataset, validation: xr.
     reaggregation to 1 km. The held-out cells are never used for training.
     """
 
-    from sentinel_analysis import fit_random_forest_downscaler
+    from citycube import fit_random_forest_downscaler
 
     names = ("no_skill", "ols", "random_forest", "pydms_global", "pydms_local")
     estimates: dict[str, list] = {name: [] for name in names}

@@ -15,7 +15,7 @@ and serialization.
 Real-product tests do not download files automatically:
 
 ```bash
-export SENTINEL_ANALYSIS_RUN_INTEGRATION=1
+export CITYCUBE_RUN_INTEGRATION=1
 export SENTINEL1_GRD_TIF_PATH=/data/process_s1_grd_output_sigma0_tc.tif  # sentinel1_backend="snap" (default)
 export SENTINEL1_ARD_PATH=/data/s1ard/ARD/...                            # sentinel1_backend="s1ard" (confirmed broken, see docs/roadmap.md)
 export SENTINEL2_SAFE_PATH=/data/S2.SAFE

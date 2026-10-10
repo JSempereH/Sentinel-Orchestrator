@@ -1,4 +1,4 @@
-<svg width="1200" height="280" viewBox="0 0 1200 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sentinel Orchestrator">
+<svg width="1200" height="280" viewBox="0 0 1200 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="citycube">
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#0c1712"/>
@@ -999,8 +999,21 @@
 
   <!-- Title block -->
   <g font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif">
-    <text x="640" y="120" font-size="30" fill="#f97316">&#127758;</text>
-    <text x="678" y="120" font-size="44" font-weight="700" fill="#f8fafc">Sentinel Orchestrator</text>
+    <svg x="634" y="78" width="46" height="46" viewBox="0 0 64 64">
+      <polygon points="6,19 32,34 32,60 6,45" fill="#57106e"/>
+      <polygon points="32,34 58,19 58,45 32,60" fill="#2a0b4a"/>
+      <polygon points="32.00,4.00 40.67,9.00 32.00,14.00 23.33,9.00" fill="#fcffa4"/>
+      <polygon points="23.33,9.00 32.00,14.00 23.33,19.00 14.67,14.00" fill="#f9c932"/>
+      <polygon points="14.67,14.00 23.33,19.00 14.67,24.00 6.00,19.00" fill="#e35933"/>
+      <polygon points="40.67,9.00 49.33,14.00 40.67,19.00 32.00,14.00" fill="#f9c932"/>
+      <polygon points="32.00,14.00 40.67,19.00 32.00,24.00 23.33,19.00" fill="#f98e09"/>
+      <polygon points="23.33,19.00 32.00,24.00 23.33,29.00 14.67,24.00" fill="#bc3754"/>
+      <polygon points="49.33,14.00 58.00,19.00 49.33,24.00 40.67,19.00" fill="#e35933"/>
+      <polygon points="40.67,19.00 49.33,24.00 40.67,29.00 32.00,24.00" fill="#bc3754"/>
+      <polygon points="32.00,24.00 40.67,29.00 32.00,34.00 23.33,29.00" fill="#8a226a"/>
+      <polygon points="32,4 58,19 32,34 6,19" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.8" stroke-linejoin="round"/>
+    </svg>
+    <text x="690" y="120" font-size="44" font-weight="700" fill="#f8fafc">citycube</text>
     <text x="640" y="156" font-size="17" font-weight="400" fill="#a8bdb0">Multisensor Earth observation &amp; thermal downscaling</text>
   </g>
 </svg>
