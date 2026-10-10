@@ -138,10 +138,11 @@ Zarr store is never loaded whole. Available statistics:
 ### Storage: AOI subsets instead of raw archives
 
 `raw_retention` (default `"aoi_subset"`) controls what stays on disk. Each
-Sentinel-3, Sentinel-5P and Sentinel-2 (SAFE path) product is read once,
+Sentinel-3, Sentinel-5P and Sentinel-2 product (SAFE archives, and COG reads
+resampled onto the predictor grid) is read once,
 cropped to the AOI plus a small margin, and stored as NetCDF under
-`<output>/subsets/<sensor>/`, keyed by product, AOI and subset format; the
-downloaded original is then deleted. A later run over the same AOI reads
+`<output>/subsets/<sensor>/`, keyed by product, AOI and subset format (and,
+for Sentinel-2 COG reads, the grid); the downloaded original is then deleted. A later run over the same AOI reads
 the subsets and downloads nothing. Bump `SUBSET_FORMAT_VERSION`
 (`workflow/adapters.py`) whenever what a reader stores changes, or old
 subsets are reused as they are. The trade-off: a larger AOI or another
@@ -170,7 +171,7 @@ ESA's Sen-ET sharpening uses besides Sentinel-2 reflectance.
 ### Downscaling
 
 `downscale=DownscaleSpec(...)` adds a final stage that sharpens every
-fused thermal scene onto the predictor grid and returns it as
+fused Sentinel-3 scene onto the predictor grid and returns it as
 `result.downscaled` (`downscaled.zarr` when saved):
 
 ```python
@@ -187,7 +188,7 @@ request = dataclasses.replace(
     sentinel2_source="stac_cog",
     terrain_predictors=True,
     thermal_overpass="day",
-    downscale=DownscaleSpec()  # model="local_trees" by default,
+    downscale=DownscaleSpec(),  # model="local_trees" by default
 )
 ```
 
@@ -204,6 +205,12 @@ no Sentinel-2 match within the temporal tolerance or fewer than
 `provenance["downscaling"]["skipped_scenes"]`. Outside a workflow, call
 `downscale_per_scene(result.cube, result.predictors["sentinel2"], terrain=result.terrain)`
 directly.
+
+Landsat is sharpened after the run rather than as a stage: request
+`("landsat", "sentinel2")` at `resolution_m=30` and call
+`sharpen_landsat(result.predictors["landsat"], result.predictors["sentinel2"])`,
+which brings Landsat from its ~100 m thermal resolution to 30 m with the
+same per-scene method ([downscaling.md](downscaling.md#landsat-at-30-m)).
 
 ## Execute
 
