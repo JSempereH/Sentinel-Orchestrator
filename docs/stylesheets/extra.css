@@ -1,0 +1,5 @@
+/* Figures sit centred in the text column instead of against its left edge. */
+.md-typeset p > img:only-child {
+  display: block;
+  margin: 0 auto;
+}
