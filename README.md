@@ -7,8 +7,9 @@
 
 `citycube` turns a city, or any polygon, and a date range into ready-to-use
 satellite data cubes: Sentinel-1/2/3/5P, Landsat, ECOSTRESS, weather and air
-quality on one grid and one time axis. It sharpens Sentinel-3 land surface
-temperature from 1 km to 100 m and summarises results per district. It runs
+quality on one grid and one time axis. It sharpens land surface temperature
+with Sentinel-2 (Sentinel-3 from 1 km to 100 m, Landsat from 100 m to 30 m)
+and summarises results per district. It runs
 as a Python library, a command line or a small web service.
 
 Documentation: [jsempereh.github.io/citycube](https://jsempereh.github.io/citycube/)

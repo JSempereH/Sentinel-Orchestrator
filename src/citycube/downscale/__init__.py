@@ -23,6 +23,8 @@ from .consistency import (
     validate_reaggregation,
 )
 from .gwr import GWRDownscaler, fit_gwr_downscaler
+from .atpk import PointCovariance, atpk_residual_field, fit_point_covariance
+from .landsat import block_aggregate, sharpen_landsat
 from .local import LinearLeafTreeEnsemble, LocalWindowDownscaler, fit_local_window_downscaler
 from .per_scene import DEFAULT_PREDICTORS, PER_SCENE_MODELS, DownscaleSpec, downscale_per_scene
 from .regression import (
@@ -46,6 +48,11 @@ __all__ = [
     "LinearLeafTreeEnsemble",
     "LocalWindowDownscaler",
     "fit_local_window_downscaler",
+    "atpk_residual_field",
+    "fit_point_covariance",
+    "PointCovariance",
+    "block_aggregate",
+    "sharpen_landsat",
     "PER_SCENE_MODELS",
     "downscale_per_scene",
     "ConformalDownscaler",

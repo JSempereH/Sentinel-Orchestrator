@@ -1,8 +1,8 @@
 # citycube
 
 citycube builds analysis-ready data cubes over a city, or any polygon, from
-satellite and weather data, and sharpens Sentinel-3 land surface temperature
-from 1 km to 100 m.
+satellite and weather data, and sharpens land surface temperature with
+Sentinel-2: Sentinel-3 from 1 km to 100 m, Landsat from 100 m to 30 m.
 
 You give it an area and a date range. It finds the products, downloads only
 what it needs, cuts them to the area, screens clouds and bad pixels, and puts
@@ -24,7 +24,7 @@ origin of every value kept.
 ## What it does with them
 
 - Daytime or night-time thermal passes, and only the scenes clear over the area.
-- Per-scene downscaling of land surface temperature to 100 m, checked against Landsat.
+- Sharpening of land surface temperature: Sentinel-3 to 100 m, checked against Landsat, and Landsat to 30 m.
 - Clipping to the exact city boundary and statistics per district or any other zone.
 - Zarr, NetCDF, GeoTIFF, CSV and GeoJSON outputs, plots and animations.
 - A small web service with a map and a job queue, for use without code.

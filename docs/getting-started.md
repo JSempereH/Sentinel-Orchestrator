@@ -132,6 +132,22 @@ result.downscaled["lst_downscaled"]   # 100 m, one map per clear pass
 
 ![Sentinel-3 at 1 km and the same pass downscaled to 100 m](assets/figures/04_downscaled_scene.png)
 
+**Landsat at 30 m.** Landsat temperature is measured at about 100 m and
+delivered resampled to 30 m; `sharpen_landsat` restores the 30 m detail
+from Sentinel-2 (extras `optical`, `landsat` and `ml`):
+
+```python
+request = cc.AnalysisRequest.for_city(
+    cc.get_city("berlin"), "2026-08-01", "2026-09-20",
+    sensors=("landsat", "sentinel2"), resolution_m=30,
+)
+request = dataclasses.replace(request, sentinel2_source="stac_cog", target_sensor="landsat")
+result = cc.AnalysisWorkflow(request).execute("output/berlin-30m")
+sharpened = cc.sharpen_landsat(result.predictors["landsat"], result.predictors["sentinel2"])
+```
+
+![Landsat as delivered and sharpened to 30 m with Sentinel-2](assets/figures/landsat_sharpened.png)
+
 **Statistics per district.** With a GeoJSON of districts or neighbourhoods:
 
 ```python
@@ -156,6 +172,6 @@ docker compose up -d                 # then open http://localhost:8100
 - [Guides](guides.md): eight notebooks that do all of the above and more on
   real data, with every output shown.
 - [Workflows](workflows.md): every request option.
-- [Downscaling](downscaling.md): how the 100 m maps are made and how well
+- [Downscaling](downscaling.md): how the 100 m and 30 m maps are made and how well
   they match Landsat.
 - [Limitations](limitations.md): what to know before relying on a result.

@@ -18,7 +18,7 @@ class _Downscaler(Protocol):
     def predict(self, predictors: xr.Dataset) -> xr.Dataset: ...
 
 
-CORRECTIONS = ("block", "smooth")
+CORRECTIONS = ("block", "smooth", "atpk")
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,11 @@ class CoarseConsistentDownscaler:
     aggregate-and-correct ``smoothing_iterations`` times, which removes the
     steps and conserves the observation to within a few hundredths of a
     kelvin (reported as ``coarse_consistency_rmse``).
+    ``"atpk"`` spreads the residual by area-to-point kriging (the residual
+    step of ATPRK, Wang et al. 2015): its spatial structure is fitted to the
+    residuals of each scene, the result has no steps, and a final per-block
+    adjustment makes conservation exact. It falls back to ``"smooth"`` when
+    a scene has too few observed cells to fit that structure.
     """
 
     base_model: _Downscaler
@@ -56,7 +61,9 @@ class CoarseConsistentDownscaler:
         aggregated = reaggregate_to_target(prediction, coarse)
         coarse_for_prediction = coarse.reindex(time=prediction.time, method="nearest")
         residual = coarse_for_prediction - aggregated
-        if self.correction == "smooth":
+        if self.correction == "atpk":
+            correction = self._atpk_correction(prediction.where(raw["downscaled_support"]), coarse, coarse_for_prediction)
+        elif self.correction == "smooth":
             correction = self._smooth_correction(prediction.where(raw["downscaled_support"]), coarse, coarse_for_prediction)
         else:
             correction = residual.reindex(time=prediction.time, method="nearest")
@@ -99,6 +106,30 @@ class CoarseConsistentDownscaler:
             residual = (coarse_for_prediction - aggregated).fillna(0)
             correction = correction + _bilinear_to(residual, prediction)
         return correction
+
+
+    def _atpk_correction(self, prediction: xr.DataArray, coarse: xr.DataArray, coarse_for_prediction: xr.DataArray) -> xr.DataArray:
+        """Area-to-point kriging of each time step's coarse residual, then an exact per-block fix."""
+
+        from .atpk import atpk_residual_field
+
+        aggregated = reaggregate_to_target(prediction, coarse).reindex(time=prediction.time, method="nearest")
+        residual = (coarse_for_prediction - aggregated).transpose("time", "y", "x")
+        layers = []
+        for index in range(prediction.sizes["time"]):
+            try:
+                field = atpk_residual_field(
+                    residual.isel(time=index).values, residual.y.values, residual.x.values, prediction.y.values, prediction.x.values,
+                )
+            except ValueError:
+                layers.append(self._smooth_correction(prediction.isel(time=[index]), coarse, coarse_for_prediction.isel(time=[index])).isel(time=0).values)
+                continue
+            layers.append(np.nan_to_num(field, nan=0.0))
+        correction = xr.DataArray(np.stack(layers), dims=("time", "y", "x"), coords={"time": prediction.time, "y": prediction.y, "x": prediction.x})
+        correction = correction.transpose(*prediction.dims)
+        # Discretisation leaves a small mismatch; remove it per coarse cell so conservation is exact.
+        remaining = (coarse_for_prediction - reaggregate_to_target(prediction + correction, coarse).reindex(time=prediction.time, method="nearest")).fillna(0)
+        return correction + remaining.reindex(y=prediction.y, x=prediction.x, method="nearest").fillna(0)
 
 
 def _bilinear_to(coarse: xr.DataArray, fine: xr.DataArray) -> xr.DataArray:

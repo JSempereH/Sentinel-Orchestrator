@@ -18,11 +18,34 @@ Detailed evidence for each change (real runs, bugs found) is in
   times and was mostly NaN fill; a Berlin run's peak memory fell from over 6 GB to 0.8 GB.
 - `downscale_per_scene(cube, fine_predictors, ...)` takes one sensor's cube
   (`result.predictors["sentinel2"]`) and static terrain from `terrain=`.
-- Per-scene downscaling defaults to `correction="smooth"` (no coarse-cell steps) and
-  `mask_unobserved=True` (no clear-sky values presented under clouds).
+- Per-scene downscaling defaults to `correction="atpk"` (area-to-point kriging of the
+  coarse residual: no coarse-cell steps, exact conservation) and `mask_unobserved=True`
+  (no clear-sky values presented under clouds).
 - `shapely>=2.0` is a core dependency.
 
 ### Added
+- `correction="atpk"`: area-to-point kriging of the coarse residual (the residual step of
+  ATPRK), with a point covariance deconvolved per scene and simple kriging. Exact
+  conservation without coarse-cell steps; for Landsat it was the best correction at every
+  scale, for Sentinel-3 its accuracy is within 0.03 K of `smooth` (`dev/downscaling-review-2026.md`).
+- `sharpen_landsat`: Landsat land surface temperature from its native ~100 m to 30 m with
+  Sentinel-2; 13-20 % lower error than interpolation in a degradation test at 180-270 m.
+- Landsat tiles of one pass (adjacent WRS rows) are mosaicked into one map instead of
+  appearing as two acquisitions seconds apart.
+- Sentinel-2 and Landsat COG reads are stored as AOI subsets keyed by grid: a rerun reads
+  nothing remotely (Berlin: Sentinel-2 from about 10 minutes to under a second).
+- Sentinel-2 tiles are mosaicked per date as they arrive, so memory holds one map per date
+  rather than every tile (Landsat at 30 m: peak 1.9 GB to 1.45 GB).
+- Cloud probe results are stored per AOI, so rejected products are not probed again on a
+  rerun (98 s to 2 ms).
+- `local_trees` fits its leaf regressions in closed form instead of thousands of
+  scikit-learn objects: identical results, about 3 times faster per scene.
+- Remote COG reads time out on stalled connections (a single hung read had blocked a run
+  for half an hour) and are retried.
+- `scripts/measure_resources.py`: time, peak memory and disk of real runs; results in
+  `docs/limitations.md`.
+- `dev/downscaling-review-2026.md`: literature review of LST downscaling and the decisions
+  it led to.
 - `model="local_trees"`: a pyDMS-style downscaler, a global model plus local models in
   moving windows of coarse cells, bagged trees with linear leaves, blended by residual.
   It is now the default model: on Berlin it had the lowest blocked-holdout error and beat

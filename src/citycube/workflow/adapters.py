@@ -12,6 +12,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
+import json
 import logging
 from pathlib import Path
 import shutil
@@ -58,6 +59,8 @@ ProgressCallback = Callable[[str, int, int], None]
 # Bump when what a stored AOI subset contains changes, so older subsets are
 # rebuilt instead of silently reused.
 SUBSET_FORMAT_VERSION = "1"
+# Bump when what the Sentinel-3 cloud probe measures changes; stored fractions are then ignored.
+PROBE_VERSION = "2"
 T = TypeVar("T")
 S5P_GASES = {"NO2", "SO2", "CO", "O3", "CH4", "HCHO", "AER_AI"}
 
@@ -86,15 +89,24 @@ def concat_time(datasets: list[xr.Dataset]) -> xr.Dataset:
     return combined.sortby("time")
 
 
-def mosaic_temporal_tiles(datasets: list[xr.Dataset]) -> list[xr.Dataset]:
-    """Mosaic same-time tiles and retain one dataset per acquisition time."""
+def mosaic_temporal_tiles(datasets: list[xr.Dataset], *, tolerance: np.timedelta64 = np.timedelta64(0, "ns")) -> list[xr.Dataset]:
+    """Mosaic same-time tiles and retain one dataset per acquisition time.
+
+    Tiles whose times are within ``tolerance`` of the first tile of a group
+    are one pass (consecutive Landsat WRS rows are ~25 s apart) and take
+    that first tile's time.
+    """
 
     grouped: dict[np.datetime64, list[xr.Dataset]] = {}
-    for dataset in datasets:
+    for dataset in sorted(datasets, key=lambda item: item.time.values[0] if "time" in item.coords and item.sizes.get("time", 0) else np.datetime64("NaT")):
         if "time" not in dataset.coords or dataset.sizes.get("time", 0) != 1:
-            raise ValueError("Sentinel-2 acquisitions must contain exactly one time step")
+            raise ValueError("Tiles to mosaic must contain exactly one time step")
         timestamp = np.datetime64(dataset.time.values[0], "ns")
-        grouped.setdefault(timestamp, []).append(dataset)
+        group = next((start for start in grouped if abs(timestamp - start) <= tolerance), None)
+        if group is None:
+            grouped[timestamp] = [dataset]
+        else:
+            grouped[group].append(dataset.assign_coords(time=[group]))
 
     mosaics: list[xr.Dataset] = []
     for timestamp in sorted(grouped):
@@ -238,14 +250,18 @@ class AcquisitionContext:
     def extract(self, sensor: str, archive: Path) -> Path:
         return self.downloader.extract(archive, self.output_dir / "extracted" / sensor / Path(archive).stem)
 
-    def subset_path(self, sensor: str, reference: ProductRef) -> Path:
-        """Where ``subset`` stores this product's AOI subset."""
+    def subset_path(self, sensor: str, reference: ProductRef, variant: str = "") -> Path:
+        """Where ``subset`` stores this product's AOI subset.
+
+        ``variant`` distinguishes subsets of one product and AOI that differ in
+        content, such as reads resampled onto different grids.
+        """
 
         aoi = self.request.aoi
-        key = hashlib.sha1(f"{aoi.west:.6f},{aoi.south:.6f},{aoi.east:.6f},{aoi.north:.6f}:{SUBSET_FORMAT_VERSION}".encode(), usedforsecurity=False).hexdigest()[:12]
+        key = hashlib.sha1(f"{aoi.west:.6f},{aoi.south:.6f},{aoi.east:.6f},{aoi.north:.6f}:{SUBSET_FORMAT_VERSION}:{variant}".encode(), usedforsecurity=False).hexdigest()[:12]
         return self.output_dir / "subsets" / sensor / f"{reference.name}__{key}.nc"
 
-    def subset(self, sensor: str, reference: ProductRef, build: Callable[[], tuple[xr.Dataset, list[Path]]]) -> xr.Dataset:
+    def subset(self, sensor: str, reference: ProductRef, build: Callable[[], tuple[xr.Dataset, list[Path]]], *, variant: str = "", compress: bool = False) -> xr.Dataset:
         """Return a product's AOI subset, building and storing it once.
 
         ``build`` downloads/reads the product and returns the AOI-cropped
@@ -258,7 +274,7 @@ class AcquisitionContext:
         """
 
         aoi = self.request.aoi
-        path = self.subset_path(sensor, reference)
+        path = self.subset_path(sensor, reference, variant)
         directory = path.parent
         directory.mkdir(parents=True, exist_ok=True)
         cache = AssetCache(directory / ".cache")
@@ -271,8 +287,13 @@ class AcquisitionContext:
             dataset.close()
         dataset.attrs.update({"source_product_id": reference.product_id, "source_product_name": reference.name})
         partial = path.with_name(path.name + ".part")
+        encoding = {
+            name: {"zlib": True, "complevel": 1}
+            for name, variable in dataset.data_vars.items()
+            if compress and variable.dtype.kind in "fiu"
+        }
         with NETCDF_LOCK:
-            netcdf_safe(dataset).to_netcdf(partial)
+            netcdf_safe(dataset).to_netcdf(partial, encoding=encoding)
         partial.replace(path)
         cache.record(path.name, path, metadata={"product_id": reference.product_id, "aoi": [aoi.west, aoi.south, aoi.east, aoi.north]})
         if self.request.raw_retention == "aoi_subset":
@@ -339,7 +360,22 @@ class Sentinel2Adapter:
         request = context.request
         if request.sentinel2_source == "stac_cog":
             grid = context.predictor_grid(self.name)
-            datasets = context.map_products(self.name, references, lambda reference: sentinel2_indices(read_s2_l2a_cog(reference, grid)))
+            # Reads are resampled onto the grid, so the grid is part of the cache key.
+            variant = f"cog:{grid.crs}:{grid.resolution}:{grid.bounds}"
+            mosaics: dict[np.datetime64, xr.Dataset] = {}
+            lock = Lock()
+
+            def read(reference: ProductRef) -> bool:
+                tile = context.subset(self.name, reference, lambda: (read_s2_l2a_cog(reference, grid), []), variant=variant, compress=True)
+                # Mosaic as tiles arrive: memory holds one map per date, not every tile.
+                with lock:
+                    timestamp = np.datetime64(tile.time.values[0], "ns")
+                    previous = mosaics.pop(timestamp, None)
+                    mosaics[timestamp] = tile if previous is None else mosaic_temporal_tiles([previous, tile])[0]
+                return True
+
+            context.map_products(self.name, references, read)
+            datasets = [sentinel2_indices(mosaics.pop(timestamp)) for timestamp in sorted(mosaics)]
         else:
             def safe_subset(reference: ProductRef) -> xr.Dataset:
                 def build() -> tuple[xr.Dataset, list[Path]]:
@@ -350,7 +386,8 @@ class Sentinel2Adapter:
             datasets = [sentinel2_indices(dataset) for dataset in context.map_products(self.name, references, safe_subset)]
             if request.predictor_grid is not None:
                 datasets = [to_grid(dataset, request.predictor_grid) for dataset in datasets]
-        combined = concat_time(mosaic_temporal_tiles(datasets))
+            datasets = mosaic_temporal_tiles(datasets)
+        combined = concat_time(datasets)
         if request.s2_composite_method:
             return compose_s2(combined, method=request.s2_composite_method, min_observations=request.s2_min_observations)
         return combined
@@ -400,13 +437,24 @@ class Sentinel3Adapter:
 
         request = context.request
         accepted: list[ProductRef] = []
+        # Measured fractions are kept, so a rerun does not download the probe
+        # files of rejected products again only to reject them.
+        aoi = request.aoi
+        probe_key = hashlib.sha1(f"{aoi.west:.6f},{aoi.south:.6f},{aoi.east:.6f},{aoi.north:.6f}:{aoi.geometry_wkt}:{PROBE_VERSION}".encode(), usedforsecurity=False).hexdigest()[:12]
+        probe_file = context.output_dir / "subsets" / self.name / f"probes__{probe_key}.json"
+        try:
+            known: dict[str, float | None] = json.loads(probe_file.read_text(encoding="utf-8")) if probe_file.exists() else {}
+        except (OSError, ValueError):
+            known = {}
         for reference in references:
             if len(accepted) >= request.max_products_per_sensor:
                 break
             root = None
             subset = context.subset_path(self.name, reference)
             try:
-                if subset.exists():
+                if reference.name in known:
+                    clear = known[reference.name]
+                elif subset.exists():
                     # Judged from the stored subset: being cached says nothing about its clouds.
                     with NETCDF_LOCK:
                         clear = subset_clear_fraction(subset, request.aoi)
@@ -418,12 +466,15 @@ class Sentinel3Adapter:
                 logger.warning("Could not probe %s (%s); acquiring it unprobed", reference.name, exc)
                 accepted.append(reference)
                 continue
+            known[reference.name] = clear
             if clear is not None and clear >= request.min_clear_fraction:
                 accepted.append(reference)
                 continue
             context.probed_out.append({"product": reference.name, "aoi_clear_fraction": None if clear is None else round(clear, 3)})
             if root is not None and request.raw_retention == "aoi_subset":
                 shutil.rmtree(root, ignore_errors=True)
+        probe_file.parent.mkdir(parents=True, exist_ok=True)
+        probe_file.write_text(json.dumps(known, indent=0, sort_keys=True), encoding="utf-8")
         logger.info("sentinel3: probed %d candidates for clear sky over the AOI, kept %d", len(accepted) + len(context.probed_out), len(accepted))
         return accepted
 
@@ -473,6 +524,9 @@ class Sentinel5PAdapter:
         return concat_time(datasets)
 
 
+LANDSAT_PASS_TOLERANCE = np.timedelta64(5, "m")
+
+
 class LandsatAdapter:
     name = "landsat"
 
@@ -481,7 +535,15 @@ class LandsatAdapter:
 
     def acquire(self, references: list[ProductRef], context: AcquisitionContext) -> xr.Dataset | None:
         grid = context.predictor_grid(self.name)
-        return concat_time(context.map_products(self.name, references, lambda reference: read_landsat_lst(reference, grid)))
+        # Reads are resampled onto the grid, so the grid is part of the cache key.
+        variant = f"cog:{grid.crs}:{grid.resolution}:{grid.bounds}"
+
+        def read(reference: ProductRef) -> xr.Dataset:
+            return context.subset(self.name, reference, lambda: (read_landsat_lst(reference, grid), []), variant=variant, compress=True)
+
+        datasets = [dataset for dataset in context.map_products(self.name, references, read) if dataset is not None]
+        # Adjacent WRS rows of one pass are separate items seconds apart; one map per pass.
+        return concat_time(mosaic_temporal_tiles(datasets, tolerance=LANDSAT_PASS_TOLERANCE)) if datasets else None
 
 
 class EcostressAdapter:

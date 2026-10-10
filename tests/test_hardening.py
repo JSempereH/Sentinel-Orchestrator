@@ -541,6 +541,43 @@ def test_smooth_correction_removes_coarse_steps_and_still_conserves():
     assert smooth.attrs["downscaling_correction"] == "smooth"
 
 
+def test_atpk_correction_conserves_exactly_and_recovers_a_smooth_unexplained_field():
+    # A warm plume the predictors cannot explain: only the residual step can place it.
+    time, s2_time = np.datetime64("2025-06-10T10:00", "ns"), np.datetime64("2025-06-10T10:30", "ns")
+    ndvi = _ndvi(0)
+    xx, yy = np.meshgrid(_FINE_X, _FINE_Y)
+    plume = 4 * np.exp(-(((xx - 3_000) / 2_500) ** 2 + ((yy - 6_000) / 2_500) ** 2))
+    truth = 40 - 20 * ndvi + plume
+    cube = _coarse_scene(time)
+    cube["lst"] = (("time", "y", "x"), _block_mean(truth)[None])
+    cube["sentinel2_matched_time"] = ("time", np.array([s2_time]))
+
+    def run(correction):
+        out = downscale_per_scene(cube, _fine_predictors([s2_time]), predictors=["NDVI"], model="linear", min_samples=10, correction=correction)
+        values = out["lst_downscaled"].isel(time=0).values
+        edge_jump = np.abs(np.diff(out["coarse_consistency_correction"].isel(time=0).values, axis=1))[:, 9::10].mean()
+        return out, float(np.sqrt(np.mean((values - truth) ** 2))), edge_jump
+
+    _, block_rmse, block_jump = run("block")
+    smooth, smooth_rmse, _ = run("smooth")
+    atpk, atpk_rmse, atpk_jump = run("atpk")
+
+    assert atpk_rmse < block_rmse and atpk_rmse <= smooth_rmse * 1.05
+    assert atpk_jump < block_jump / 2
+    np.testing.assert_allclose(_block_mean(atpk["lst_downscaled"].isel(time=0).values), cube["lst"].isel(time=0).values, atol=1e-6)
+    assert atpk.attrs["downscaling_correction"] == "atpk"
+
+
+def test_atpk_falls_back_to_smooth_when_too_few_cells_are_observed():
+    time, s2_time = np.datetime64("2025-06-10T10:00", "ns"), np.datetime64("2025-06-10T10:30", "ns")
+    cube = _coarse_scene(time)
+    cube["lst"][:, :, 3:] = np.nan  # only 30 cells observed, and most of them in one strip
+    cube["lst"][:, 3:, :] = np.nan  # 9 cells: too few to fit a covariance
+    cube["sentinel2_matched_time"] = ("time", np.array([s2_time]))
+    out = downscale_per_scene(cube, _fine_predictors([s2_time]), predictors=["NDVI"], model="linear", min_samples=5, correction="atpk")
+    assert np.isfinite(out["lst_downscaled"].isel(time=0, y=slice(0, 30), x=slice(0, 30))).all()
+
+
 def test_unobserved_coarse_cells_are_masked_unless_asked_to_fill():
     time, s2_time = np.datetime64("2025-06-10T10:00", "ns"), np.datetime64("2025-06-10T10:30", "ns")
     cube = _coarse_scene(time)
@@ -950,3 +987,77 @@ def test_reaggregation_accepts_spatially_chunked_stores():
                           coords={"time": [0, 1], "y": coarse_x[::-1], "x": coarse_x}, attrs={"crs": "EPSG:32633"})
     lazy = reaggregate_to_target(fine.chunk({"time": 1, "y": 16, "x": 16}), target)
     np.testing.assert_allclose(lazy.values, reaggregate_to_target(fine, target).values)
+
+
+def test_sentinel2_cog_reads_are_cached_per_grid_and_mosaicked_per_date(tmp_path, monkeypatch):
+    from citycube.workflow import adapters
+
+    grid = AnalysisGrid.for_aoi(AOI(13.2, 52.4, 13.3, 52.45), resolution_m=500)
+    reads: list[str] = []
+
+    def fake_read(reference, target_grid):
+        reads.append(reference.name)
+        height, width = target_grid.height, target_grid.width
+        half = np.full((1, height, width), np.nan, dtype="float32")
+        rows = slice(0, height // 2) if reference.name.endswith("a") else slice(height // 2, height)
+        half[0, rows] = 0.1
+        time = np.array([np.datetime64(reference.start_datetime.rstrip("Z"), "ns")])
+        coords = {"time": time, "y": np.arange(height, dtype=float), "x": np.arange(width, dtype=float)}
+        bands = {name: (("time", "y", "x"), half.copy()) for name in ("B02", "B03", "B04", "B08", "B11", "B12")}
+        return xr.Dataset({**bands, "valid_mask": (("time", "y", "x"), np.isfinite(half))}, coords=coords, attrs={"crs": target_grid.crs})
+
+    monkeypatch.setattr(adapters, "read_s2_l2a_cog", fake_read)
+    request = _request(sensors=("sentinel2",), sentinel2_source="stac_cog", predictor_grid=grid)
+    # Two tiles of one date and one tile of another.
+    references = [_product("T1_a", "2025-06-10T10:00:00Z"), _product("T2_b", "2025-06-10T10:00:00Z"), _product("T1_c", "2025-06-12T10:00:00Z")]
+
+    first = adapters.Sentinel2Adapter().acquire(references, adapters.AcquisitionContext(request=request, output_dir=tmp_path, downloader_factory=lambda: None))
+    assert first.sizes["time"] == 2
+    assert np.isfinite(first["NDVI"].isel(time=0).values).all()  # both halves of the first date
+    assert len(reads) == 3
+
+    again = adapters.Sentinel2Adapter().acquire(references, adapters.AcquisitionContext(request=request, output_dir=tmp_path, downloader_factory=lambda: None))
+    assert len(reads) == 3  # served from the stored subsets
+    xr.testing.assert_allclose(first["NDVI"], again["NDVI"])
+
+    finer = dataclasses.replace(request, predictor_grid=AnalysisGrid.for_aoi(AOI(13.2, 52.4, 13.3, 52.45), resolution_m=250))
+    adapters.Sentinel2Adapter().acquire(references, adapters.AcquisitionContext(request=finer, output_dir=tmp_path, downloader_factory=lambda: None))
+    assert len(reads) == 6  # another grid is another read
+
+
+def test_cloud_probe_results_are_reused_without_downloading_again(tmp_path):
+    from citycube.sensors.sentinel3.reader import SLSTR_PROBE_FILES
+    from citycube.workflow.adapters import AcquisitionContext, Sentinel3Adapter
+
+    clouded_rows = {"a": 9, "b": 0, "c": 1}
+    downloads: list[str] = []
+
+    class CountingDownloader:
+        def download_files(self, reference, names, output):
+            assert tuple(names) == SLSTR_PROBE_FILES
+            downloads.append(reference.name)
+            return _probe_files(Path(output) / reference.name, cloudy_rows=clouded_rows[reference.name])
+
+    request = _request(max_products_per_sensor=2, min_clear_fraction=0.5)
+    references = [_product(name, f"2026-08-0{i + 1}T09:30:00Z") for i, name in enumerate("abc")]
+    first = Sentinel3Adapter()._select_clear(references, AcquisitionContext(request=request, output_dir=tmp_path, downloader_factory=CountingDownloader), tmp_path / "downloads")
+    assert [r.name for r in first] == ["b", "c"] and downloads == ["a", "b", "c"]
+
+    again = AcquisitionContext(request=request, output_dir=tmp_path, downloader_factory=CountingDownloader)
+    second = Sentinel3Adapter()._select_clear(references, again, tmp_path / "downloads")
+    assert [r.name for r in second] == ["b", "c"]
+    assert downloads == ["a", "b", "c"]  # nothing probed twice
+    assert again.probed_out == [{"product": "a", "aoi_clear_fraction": pytest.approx(0.1)}]
+
+    polygon = dataclasses.replace(request, aoi=AOI.from_geojson({"type": "Polygon", "coordinates": [[[13.2, 52.4], [13.6, 52.4], [13.4, 52.6], [13.2, 52.4]]]}))
+    Sentinel3Adapter()._select_clear(references, AcquisitionContext(request=polygon, output_dir=tmp_path, downloader_factory=CountingDownloader), tmp_path / "downloads")
+    assert len(downloads) > 3  # another shape is measured again
+
+
+def test_remote_cog_reads_cannot_hang_forever():
+    # A stalled Planetary Computer read once blocked a run for half an hour.
+    from citycube.sensors.cog import GDAL_HTTP_OPTIONS
+
+    assert int(GDAL_HTTP_OPTIONS["GDAL_HTTP_TIMEOUT"]) <= 300
+    assert int(GDAL_HTTP_OPTIONS["GDAL_HTTP_CONNECTTIMEOUT"]) <= 60
+    assert int(GDAL_HTTP_OPTIONS["GDAL_HTTP_LOW_SPEED_TIME"]) > 0

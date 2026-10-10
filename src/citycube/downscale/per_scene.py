@@ -53,7 +53,7 @@ class DownscaleSpec:
     min_samples: int = 30
     predictor_sensor: str = "sentinel2"
     model_options: Mapping[str, Any] = field(default_factory=dict)
-    correction: str = "smooth"
+    correction: str = "atpk"
     mask_unobserved: bool = True
 
     def __post_init__(self) -> None:
@@ -89,7 +89,7 @@ class DownscaleSpec:
             min_samples=int(value.get("min_samples", 30)),
             predictor_sensor=value.get("predictor_sensor", "sentinel2"),
             model_options=dict(value.get("model_options", {})),
-            correction=value.get("correction", "smooth"),
+            correction=value.get("correction", "atpk"),
             mask_unobserved=bool(value.get("mask_unobserved", True)),
         )
 
@@ -106,7 +106,7 @@ def downscale_per_scene(
     predictor_sensor: str = "sentinel2",
     terrain: xr.Dataset | None = None,
     model_options: Mapping[str, Any] | None = None,
-    correction: str = "smooth",
+    correction: str = "atpk",
     mask_unobserved: bool = True,
     store: str | Path | None = None,
     domain: xr.DataArray | None = None,
@@ -129,7 +129,8 @@ def downscale_per_scene(
     scene can be downscaled.
 
     ``correction`` is the coarse-consistency correction (see
-    ``CoarseConsistentDownscaler``): ``"smooth"`` avoids coarse-cell steps.
+    ``CoarseConsistentDownscaler``): ``"atpk"`` spreads the coarse residual by
+    area-to-point kriging, with no coarse-cell steps and exact conservation.
     With ``mask_unobserved`` fine cells whose coarse cell had no valid
     observation (cloud, quality) are left empty: the model would otherwise
     present clear-sky estimates there as if they were observed.
