@@ -1,40 +1,42 @@
-# Sentinel Analysis
+# citycube
 
-Library for combining Sentinel-1/2/3/5P with ERA5, CAMS, and OpenAQ over an
-area of interest. The workflow keeps thermal observations, predictors, and
-stations separate.
+citycube builds analysis-ready data cubes over a city, or any polygon, from
+satellite and weather data, and sharpens Sentinel-3 land surface temperature
+from 1 km to 100 m.
 
-## Three Commands
+You give it an area and a date range. It finds the products, downloads only
+what it needs, cuts them to the area, screens clouds and bad pixels, and puts
+every source on one grid and one time axis, with the units, quality masks and
+origin of every value kept.
 
-```bash
-uv sync --extra dev --extra auxiliary --extra optical
-uv run sentinel-analysis plan request.json
-uv run --extra auxiliary --extra optical python scripts/smoke_e2e.py
-```
+![Sentinel-3 land surface temperature over Berlin, three weeks of daytime passes](assets/figures/lst_berlin.gif)
 
-## Scientific Rule
+## What it reads
 
-A Sentinel-5P or CAMS atmospheric column is not automatically a surface
-concentration. Conversion to a surface estimate must be explicit and marked
-as modeled.
+- **Sentinel-3**: land surface temperature, 1 km, several passes a day.
+- **Sentinel-2**: reflectance and vegetation, built-up and water indices, 10 to 100 m.
+- **Sentinel-1**: radar backscatter, through clouds.
+- **Sentinel-5P**: nitrogen dioxide and other gases.
+- **Landsat 8/9 and ECOSTRESS**: land surface temperature at about 100 m, less often.
+- **ERA5, CAMS and OpenAQ**: air temperature, modelled air quality and ground stations.
+- **Copernicus DEM**: elevation, slope and solar illumination.
 
-## Project Status
+## What it does with them
 
-- Canonical package: `sentinel_analysis`.
-- Sentinel-3: `Sentinel3LST` for local processing and `Sentinel3LSTClient` for openEO.
-- Sentinel-1: four `sentinel1_backend` options - `"snap"` (default, local
-  SNAP GPT), `"hyp3_rtc"` (ASF HyP3 cloud RTC, no SNAP needed), `"pc_rtc"`
-  (Planetary Computer RTC COGs read in place), `"s1ard"` (pyroSAR NRB, currently broken - see `roadmap.md`).
-- Sentinel-2: full SAFE downloads from CDSE (default) or
-  `sentinel2_source="stac_cog"` windowed COG reads.
-- Independent thermal references: Landsat 8/9 (`sensors/landsat.py`) and
-  ECOSTRESS (`sensors/ecostress.py`), alongside Sentinel-3's own `lst`.
-- Downscaling/fusion (`downscale/`): OLS/TsHARP, Random Forest, XGBoost,
-  GWR (geographically weighted regression), and STARFM/ESTARFM
-  spatiotemporal fusion - see `downscaling.md` for what's validated on
-  real data versus synthetic-only.
-- Auxiliary sources: `providers/era5.py`, `providers/cams.py`, and `providers/openaq.py`.
-- Cache: SHA-256 checksums plus size/mtime in a JSON manifest; files are re-hashed only when their size or mtime changes.
-- `worker/`: an optional FastAPI service (+ bundled UI) that runs
-  `AnalysisWorkflow.execute()` as a submit/poll/download job over HTTP -
-  see `platform.md`.
+- Daytime or night-time thermal passes, and only the scenes clear over the area.
+- Per-scene downscaling of land surface temperature to 100 m, checked against Landsat.
+- Clipping to the exact city boundary and statistics per district or any other zone.
+- Zarr, NetCDF, GeoTIFF, CSV and GeoJSON outputs, plots and animations.
+- A small web service with a map and a job queue, for use without code.
+
+![Sentinel-3 at 1 km, the same pass at 100 m, the Sentinel-2 NDVI it used and the correction that keeps it consistent with the observation](assets/figures/04_downscaled_scene.png)
+
+## Start here
+
+- [Getting started](getting-started.md): install, credentials and a first map in ten minutes.
+- [Guides](guides.md): eight notebooks on real data, from a single map to districts and methane plumes.
+- [Limitations](limitations.md): what to know before relying on a result.
+
+A Sentinel-5P or CAMS column is not a surface concentration. citycube keeps
+them apart, and any conversion to a surface estimate is explicit and marked
+as modelled.

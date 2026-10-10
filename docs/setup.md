@@ -12,10 +12,10 @@ For Sentinel-1 processing, pick one of four `sentinel1_backend` values:
 uv sync --extra sar                      # "snap" (the default) - needs SNAP's `gpt` on PATH
 uv sync --extra hyp3                     # "hyp3_rtc" - no SNAP/native deps, needs Earthdata credentials below
 uv sync --extra optical --extra landsat  # "pc_rtc" - Planetary Computer RTC COGs, no credentials, not yet validated on real scenes
-uv sync --extra s1ard                    # "s1ard" - confirmed broken, see docs/roadmap.md; kept in case upstream fixes it
+uv sync --extra s1ard                    # "s1ard" - confirmed broken, see docs/limitations.md; kept in case upstream fixes it
 ```
 
-Other optional extras: `cloud` (Zarr output, needed by `sentinel-analysis
+Other optional extras: `cloud` (Zarr output, needed by `citycube
 run` and `AnalysisResult.save`) and `odc` (`AnalysisGrid.to_geobox()`/
 `from_geobox()` interop with odc-geo/odc-stac).
 
@@ -118,5 +118,5 @@ These commands only show whether a credential exists, never its value:
 
 ```bash
 uv run --extra auxiliary python -c 'import cdsapi; c=cdsapi.Client(quiet=True); print(c.url, bool(c.key))'
-uv run python -c 'from sentinel_analysis.providers import CAMSConfig, OpenAQConfig; print(bool(CAMSConfig.from_env().api_key), bool(OpenAQConfig.from_env().api_key))'
+uv run python -c 'from citycube.providers import CAMSConfig, OpenAQConfig; print(bool(CAMSConfig.from_env().api_key), bool(OpenAQConfig.from_env().api_key))'
 ```

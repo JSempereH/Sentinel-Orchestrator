@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml worker/requirements.txt --extra cdse --extra auxiliary --extra optical --extra sar --extra cloud --extra hyp3 --extra landsat --extra ecostress --extra ml --python-version 3.12 --python-platform x86_64-unknown-linux-gnu -o worker/requirements.lock
 affine==3.0.1
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   rasterio
 annotated-doc==0.0.5
     # via fastapi
@@ -29,7 +29,7 @@ botocore==1.43.109
     #   eodag
     #   s3transfer
 cdsapi==0.7.7
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 certifi==2026.7.22
     # via
     #   netcdf4
@@ -58,7 +58,7 @@ cloudpickle==3.1.2
 cryptography==50.0.2
     # via pyjwt
 dask==2026.8.0
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 deprecated==3.0.0
     # via openeo
 donfig==0.8.1.post1
@@ -66,7 +66,7 @@ donfig==0.8.1.post1
 ecmwf-datastores-client==0.5.3
     # via cdsapi
 eodag==4.9.2
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 fastapi==0.143.0
     # via -r worker/requirements.txt
 fsspec==2026.9.0
@@ -84,7 +84,7 @@ h11==0.16.0
 httptools==0.8.0
     # via uvicorn
 hyp3-sdk==7.7.8
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 idna==3.20
     # via
     #   anyio
@@ -114,12 +114,12 @@ multiurl==0.3.9
 narwhals==2.26.0
     # via scikit-learn
 netcdf4==1.7.4
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 numcodecs==0.17.0
     # via zarr
 numpy==2.5.3
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   cftime
     #   dask
     #   geopandas
@@ -138,7 +138,7 @@ numpy==2.5.3
 nvidia-nccl-cu13==2.27.7
     # via xgboost
 openeo==0.53.0
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 opentelemetry-api==1.45.1
     # via fastapi
 orjson==3.13.0
@@ -159,7 +159,7 @@ pandas==2.3.3
 partd==1.4.2
     # via dask
 planetary-computer==1.0.0
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 pycparser==3.1
     # via cffi
 pydantic==2.14.0
@@ -186,7 +186,7 @@ pyparsing==3.3.3
     # via rasterio
 pyproj==3.8.0
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   eodag
     #   geopandas
 pyshp==3.1.6
@@ -288,7 +288,7 @@ python-dateutil==2.9.0.post0
     #   pystac-core
 python-dotenv==1.2.4
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   planetary-computer
     #   pydantic-settings
     #   uvicorn
@@ -304,14 +304,14 @@ pyyaml==6.0.3
     #   eodag
     #   uvicorn
 rasterio==1.5.2
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
 requests==2.34.2
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   cdsapi
     #   ecmwf-datastores-client
     #   eodag
@@ -327,14 +327,14 @@ rpds-py==2026.9.1
 s3transfer==0.19.2
     # via boto3
 scikit-learn==1.9.1
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 scipy==1.18.1
     # via
     #   scikit-learn
     #   xgboost
 shapely==2.2.0
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   eodag
     #   geopandas
     #   openeo
@@ -396,12 +396,12 @@ wrapt==2.5.0
     # via deprecated
 xarray==2026.9.0
     # via
-    #   sentinel-analysis (pyproject.toml)
+    #   citycube (pyproject.toml)
     #   openeo
 xgboost==3.4.1
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 zarr==3.4.1
-    # via sentinel-analysis (pyproject.toml)
+    # via citycube (pyproject.toml)
 zipp==4.1.1
     # via importlib-metadata
 zipstream-ng==1.9.3

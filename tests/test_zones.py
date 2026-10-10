@@ -7,11 +7,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisRequest, ZoneSet, aoi_mask, clip_to_aoi, downscale_per_scene, zonal_statistics
-from sentinel_analysis.cities import get_city
-from sentinel_analysis.catalog import ProductRef, annotate_aoi_coverage
-from sentinel_analysis.cube import projected_bounds
-from sentinel_analysis.config import MAX_AOI_VERTICES
+from citycube import AOI, AnalysisRequest, ZoneSet, aoi_mask, clip_to_aoi, downscale_per_scene, zonal_statistics
+from citycube.cities import get_city
+from citycube.catalog import ProductRef, annotate_aoi_coverage
+from citycube.cube import projected_bounds
+from citycube.config import MAX_AOI_VERTICES
 
 TRIANGLE = {"type": "Polygon", "coordinates": [[[13.3, 52.4], [13.5, 52.4], [13.4, 52.6], [13.3, 52.4]]]}
 SQUARE = {"type": "Polygon", "coordinates": [[[13.3, 52.4], [13.4, 52.4], [13.4, 52.5], [13.3, 52.5], [13.3, 52.4]]]}

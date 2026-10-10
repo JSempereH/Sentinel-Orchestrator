@@ -38,7 +38,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-import sentinel_analysis as sa  # noqa: E402
+import citycube as cc  # noqa: E402
 
 START = os.getenv("VALIDATION_START", "2026-08-01")
 END = os.getenv("VALIDATION_END", "2026-08-21")
@@ -89,9 +89,9 @@ def holdout_rmse(result, spec: dict) -> float:
     rows, cols = np.indices((cube.sizes["y"], cube.sizes["x"]))
     hidden = xr.DataArray(((rows // BLOCK + cols // BLOCK) % 2 == 1), dims=("y", "x"), coords={"y": cube.y, "x": cube.x})
     training = cube.assign(lst=cube["lst"].where(~hidden))
-    fine = sa.downscale_per_scene(training, result.predictors["sentinel2"], terrain=result.terrain, min_samples=20, mask_unobserved=False, **spec)
-    aggregated = sa.reaggregate_to_target(fine["lst_downscaled"].assign_attrs(crs=cube.attrs["crs"]), cube["lst"].assign_attrs(crs=cube.attrs["crs"]))
-    return float(sa.compare_to_reference(aggregated.where(hidden), cube["lst"].sel(time=aggregated.time).where(hidden))["rmse"])
+    fine = cc.downscale_per_scene(training, result.predictors["sentinel2"], terrain=result.terrain, min_samples=20, mask_unobserved=False, **spec)
+    aggregated = cc.reaggregate_to_target(fine["lst_downscaled"].assign_attrs(crs=cube.attrs["crs"]), cube["lst"].assign_attrs(crs=cube.attrs["crs"]))
+    return float(cc.compare_to_reference(aggregated.where(hidden), cube["lst"].sel(time=aggregated.time).where(hidden))["rmse"])
 
 
 def main() -> int:
@@ -99,18 +99,18 @@ def main() -> int:
     for noisy in ("httpx", "openeo", "urllib3", "rasterio"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     acquire("validate_downscaling_landsat.py")
-    city = sa.get_city(CITY)
-    request = sa.AnalysisRequest.for_city(city, START, END, sensors=("sentinel3", "sentinel2", "landsat"), resolution_m=100, max_products_per_sensor=20)
+    city = cc.get_city(CITY)
+    request = cc.AnalysisRequest.for_city(city, START, END, sensors=("sentinel3", "sentinel2", "landsat"), resolution_m=100, max_products_per_sensor=20)
     request = dataclasses.replace(
         request, sentinel2_source="stac_cog", s2_cloud_cover_max=60, thermal_overpass="day", terrain_predictors=True,
         min_clear_fraction=0.3, temporal_tolerances={"landsat": np.timedelta64(1, "D")},
     )
     started = time.time()
-    result = sa.AnalysisWorkflow(request).execute(WORK, max_workers=1)
+    result = cc.AnalysisWorkflow(request).execute(WORK, max_workers=1)
     report: dict = {"city": CITY, "period": [START, END], "scenes": int(result.cube.sizes["time"]), "probed_out": len(result.provenance.get("probed_out", [])), "models": {}}
     for label, spec in MODELS.items():
         logging.info("evaluating %s", label)
-        downscaled = sa.downscale_per_scene(result.cube, result.predictors["sentinel2"], terrain=result.terrain, **spec)
+        downscaled = cc.downscale_per_scene(result.cube, result.predictors["sentinel2"], terrain=result.terrain, **spec)
         report["models"][label] = {"landsat": landsat_scores(result, downscaled), "holdout_rmse": holdout_rmse(result, spec)}
     report["seconds"] = round(time.time() - started)
     OUTPUT.mkdir(parents=True, exist_ok=True)

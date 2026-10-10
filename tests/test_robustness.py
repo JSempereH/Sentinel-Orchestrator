@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import AOI, AnalysisRequest, AnalysisWorkflow, Sentinel2Catalog, align_features
-from sentinel_analysis.fusion import TemporalMatch
-from sentinel_analysis.harmonization.spatial import harmonize_spatial
+from citycube import AOI, AnalysisRequest, AnalysisWorkflow, Sentinel2Catalog, align_features
+from citycube.fusion import TemporalMatch
+from citycube.harmonization.spatial import harmonize_spatial
 
 
 def _cube(name: str, times: list[str], values: list[float], *, x=(0.0, 100.0), y=(100.0, 0.0), grid_id: str = "g") -> xr.Dataset:
@@ -115,7 +115,7 @@ def test_workflow_discovery_ranks_all_candidates_before_truncating(monkeypatch):
     # Early acquisitions are cloudy, the clear ones come last in date order.
     pages = [[_odata_item(0, 90.0), _odata_item(1, 80.0)], [_odata_item(2, 5.0), _odata_item(3, 1.0)]]
     session = _PagedSession(pages)
-    monkeypatch.setattr("sentinel_analysis.sensors.sentinel2.http_session", lambda: session)
+    monkeypatch.setattr("citycube.sensors.sentinel2.http_session", lambda: session)
     request = AnalysisRequest(aoi=AOI(13.2, 52.4, 13.6, 52.6), start="2025-06-10", end="2025-06-13", sensors=("sentinel2",), max_products_per_sensor=2)
 
     selected = AnalysisWorkflow(request).discover()["sentinel2"]
@@ -132,7 +132,7 @@ def test_sentinel2_catalog_search_still_honours_its_own_limit():
 def test_asset_cache_trusts_unchanged_stat_and_rehashes_only_on_change(tmp_path, monkeypatch):
     import os
 
-    from sentinel_analysis.cache import AssetCache
+    from citycube.cache import AssetCache
 
     asset = tmp_path / "product.zip"
     asset.write_bytes(b"original")
@@ -170,7 +170,7 @@ def test_asset_cache_trusts_unchanged_stat_and_rehashes_only_on_change(tmp_path,
 def test_asset_cache_upgrades_legacy_entries_without_stat(tmp_path):
     import json
 
-    from sentinel_analysis.cache import AssetCache
+    from citycube.cache import AssetCache
 
     asset = tmp_path / "file.nc"
     asset.write_bytes(b"data")
@@ -193,7 +193,7 @@ def _linear_training(n_time: int = 120) -> xr.Dataset:
 
 def test_fit_sklearn_downscaler_wraps_any_estimator_and_validates_with_one_prediction(monkeypatch):
     sklearn_linear = pytest.importorskip("sklearn.linear_model")
-    from sentinel_analysis import RandomForestDownscaler, SklearnDownscaler, fit_random_forest_downscaler, fit_sklearn_downscaler, validate_downscaler
+    from citycube import RandomForestDownscaler, SklearnDownscaler, fit_random_forest_downscaler, fit_sklearn_downscaler, validate_downscaler
 
     training = _linear_training()
     model = fit_sklearn_downscaler(training, sklearn_linear.LinearRegression(), predictors=("NDVI",), method="ols_sklearn")
@@ -222,7 +222,7 @@ def test_fit_sklearn_downscaler_wraps_any_estimator_and_validates_with_one_predi
 def test_regridding_stays_lazy_for_dask_inputs_and_matches_eager_results():
     pytest.importorskip("dask")
     pytest.importorskip("rasterio")
-    from sentinel_analysis import reaggregate_to_target
+    from citycube import reaggregate_to_target
 
     rng = np.random.default_rng(0)
     times = np.array(["2025-06-10", "2025-06-11", "2025-06-12", "2025-06-13"], dtype="datetime64[ns]")
@@ -256,7 +256,7 @@ def test_regridding_stays_lazy_for_dask_inputs_and_matches_eager_results():
 
 
 def test_blocked_split_holds_out_whole_blocks_and_rejects_unsorted_time():
-    from sentinel_analysis import blocked_calibration_split, blocked_spatiotemporal_split
+    from citycube import blocked_calibration_split, blocked_spatiotemporal_split
 
     cube = xr.Dataset(
         {"lst": (("time", "y", "x"), np.ones((10, 8, 8)))},
@@ -278,7 +278,7 @@ def test_blocked_split_holds_out_whole_blocks_and_rejects_unsorted_time():
 
 def test_conformal_intervals_reach_target_coverage_and_widen_where_the_model_is_unsure():
     pytest.importorskip("sklearn")
-    from sentinel_analysis import (
+    from citycube import (
         blocked_calibration_split,
         blocked_spatiotemporal_split,
         fit_conformal_downscaler,
@@ -316,7 +316,7 @@ def test_conformal_intervals_reach_target_coverage_and_widen_where_the_model_is_
 
 
 def test_linear_models_clip_predictors_to_the_training_range_and_flag_it():
-    from sentinel_analysis import fit_linear_downscaler, validate_downscaler
+    from citycube import fit_linear_downscaler, validate_downscaler
 
     model = fit_linear_downscaler(_linear_training(), predictors=("NDVI",))  # NDVI in [0, 1), lst = 20 + 5 * NDVI
     fine = xr.Dataset(
@@ -339,7 +339,7 @@ def test_reprojection_keeps_north_up_for_ascending_and_descending_latitudes(asce
     to place row 0 at the top regardless and flipped them north-south."""
 
     pytest.importorskip("rasterio")
-    from sentinel_analysis import AnalysisGrid
+    from citycube import AnalysisGrid
 
     lat = np.arange(52.305, 52.6, 0.01)
     lat = lat if ascending else lat[::-1]
@@ -360,7 +360,7 @@ def test_reprojection_keeps_north_up_for_ascending_and_descending_latitudes(asce
 def test_asset_cache_keeps_every_entry_under_concurrent_writers(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from sentinel_analysis.cache import AssetCache
+    from citycube.cache import AssetCache
 
     files = []
     for index in range(40):

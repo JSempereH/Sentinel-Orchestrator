@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="citycube">
+  <polygon points="6,19 32,34 32,60 6,45" fill="#57106e"/>
+  <polygon points="32,34 58,19 58,45 32,60" fill="#2a0b4a"/>
+  <polygon points="32.00,4.00 40.67,9.00 32.00,14.00 23.33,9.00" fill="#fcffa4"/>
+  <polygon points="23.33,9.00 32.00,14.00 23.33,19.00 14.67,14.00" fill="#f9c932"/>
+  <polygon points="14.67,14.00 23.33,19.00 14.67,24.00 6.00,19.00" fill="#e35933"/>
+  <polygon points="40.67,9.00 49.33,14.00 40.67,19.00 32.00,14.00" fill="#f9c932"/>
+  <polygon points="32.00,14.00 40.67,19.00 32.00,24.00 23.33,19.00" fill="#f98e09"/>
+  <polygon points="23.33,19.00 32.00,24.00 23.33,29.00 14.67,24.00" fill="#bc3754"/>
+  <polygon points="49.33,14.00 58.00,19.00 49.33,24.00 40.67,19.00" fill="#e35933"/>
+  <polygon points="40.67,19.00 49.33,24.00 40.67,29.00 32.00,24.00" fill="#bc3754"/>
+  <polygon points="32.00,24.00 40.67,29.00 32.00,34.00 23.33,29.00" fill="#8a226a"/>
+  <polygon points="32,4 58,19 32,34 6,19" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.8" stroke-linejoin="round"/>
+</svg>

@@ -1,9 +1,9 @@
-# Platform: sentinel_analysis and sentinel-worker
+# Platform: citycube and citycube-worker
 
 This repo hosts two things:
 
-- `src/sentinel_analysis/` - the library (docs, tests, CLI).
-- `worker/` - a thin FastAPI wrapper around it (`sentinel-worker`), so a
+- `src/citycube/` - the library (docs, tests, CLI).
+- `worker/` - a thin FastAPI wrapper around it (`citycube-worker`), so a
   multisensor `AnalysisRequest` can be submitted/polled/downloaded over HTTP
   from a machine with the heavy geospatial extras installed. It ships its
   own UI (`worker/frontend/`, served by the worker itself at `/`) and
@@ -18,7 +18,7 @@ from wherever, not as shared data models or in-process coupling.
 ## Running the worker
 
 ```bash
-make install-worker   # creates worker/.venv, installs deps + sentinel_analysis extras
+make install-worker   # creates worker/.venv, installs deps + citycube extras
 make worker           # :8100
 ```
 
@@ -89,7 +89,7 @@ the same lock, so a lock that no longer resolves fails there first.
 
 SNAP is not in the image (`sentinel1_backend="snap"` needs a separate image
 with `gpt` on `PATH`); `hyp3_rtc` and `pc_rtc` need nothing extra. `s1ard`
-is excluded because it is broken (see `roadmap.md`).
+is excluded because it is broken (see [limitations](limitations.md)).
 
 ### Jobs
 
@@ -142,7 +142,7 @@ is excluded because it is broken (see `roadmap.md`).
   alert; `ARGS=--full` adds Sentinel-2 COGs and downscaling. Results are
   appended to `output/canary/history.jsonl`. `make check-credentials` runs
   only the credential part.
-- Every result's `provenance.json` records the `sentinel_analysis` version
+- Every result's `provenance.json` records the `citycube` version
   and git commit (`software`) that produced it.
 
 ### Security notes
@@ -157,15 +157,3 @@ is excluded because it is broken (see `roadmap.md`).
   which needs Node.js 20.19 or newer for local frontend development.
 - Requests run as the token holder: parameters such as `downscale.model_options` are passed
   to the models as given, so the token must only go to trusted users.
-
-### Quality gates
-
-- **CI** (`.github/workflows/ci.yml`): ruff, mypy, the `sentinel_analysis`
-  tests and package build; the worker tests installed from
-  `requirements.lock`; and the frontend's `npm ci`, eslint and build
-  (which type-checks with `tsc`).
-- Live-data checks (`scripts/validate_*`, the benchmarks, the canary) are
-  run by hand or on a schedule, not in CI, since they need credentials and
-  download real data.
-- **Git hygiene**: `worker/runs/` is in `.gitignore` - it's the worker's
-  job-output directory (regenerable by re-running a job), not source.

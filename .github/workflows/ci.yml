@@ -35,7 +35,7 @@ jobs:
       # pyproject.toml's [tool.mypy] since optional extras (rasterio, scipy,
       # planetary_computer, eodag, ...) don't all ship type stubs.
       - name: Type check (mypy)
-        run: uv run mypy src/sentinel_analysis
+        run: uv run mypy src/citycube
 
       - name: Test
         run: uv run pytest -q

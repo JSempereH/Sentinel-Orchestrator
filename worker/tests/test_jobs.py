@@ -1,7 +1,7 @@
 """
-Tests for the sentinel-worker API. `app.jobs.execute_and_persist` is
+Tests for the citycube-worker API. `app.jobs.execute_and_persist` is
 monkeypatched in every test that submits a job, so nothing here needs
-sentinel_analysis's heavy extras or real CDSE/CDS/OpenAQ credentials.
+citycube's heavy extras or real CDSE/CDS/OpenAQ credentials.
 """
 
 import threading

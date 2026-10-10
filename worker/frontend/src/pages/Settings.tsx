@@ -49,7 +49,7 @@ export function SettingsPage() {
     <div className="page" style={{ maxWidth: 620 }}>
       <h2 style={{ marginBottom: 4 }}>Settings</h2>
       <p style={{ margin: "0 0 28px", color: "var(--text-muted)", fontSize: 13 }}>
-        This page only configures how the browser talks to the sentinel-worker. Provider
+        This page only configures how the browser talks to the citycube-worker. Provider
         credentials (CDSE, CDS/ADS, OpenAQ, Earthdata) live in the worker's own <code>.env</code>{" "}
         file on the machine running it - they never pass through this UI.
       </p>

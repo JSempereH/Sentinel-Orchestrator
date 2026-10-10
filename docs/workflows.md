@@ -3,7 +3,7 @@
 ## Declarative Request
 
 ```python
-from sentinel_analysis import AnalysisRequest, AuxiliarySpec, get_city
+from citycube import AnalysisRequest, AuxiliarySpec, get_city
 
 request = AnalysisRequest.for_city(
     get_city("Berlin"),
@@ -22,7 +22,7 @@ For an arbitrary area, `AnalysisGrid.for_aoi` snaps a grid in the AOI's
 UTM zone (edges densified, so the whole AOI is enclosed):
 
 ```python
-from sentinel_analysis import AOI, AnalysisGrid, AnalysisRequest
+from citycube import AOI, AnalysisGrid, AnalysisRequest
 
 aoi = AOI(west=-3.80, south=40.35, east=-3.60, north=40.50)
 predictor_grid = AnalysisGrid.for_aoi(aoi, resolution_m=100)
@@ -91,7 +91,7 @@ stored as AOI subsets are judged from the subset itself, with no download.
 An `AOI` is a bounding box and, optionally, the exact polygon of the area:
 
 ```python
-from sentinel_analysis import AOI, ZoneSet, zonal_statistics, clip_to_aoi
+from citycube import AOI, ZoneSet, zonal_statistics, clip_to_aoi
 
 aoi = AOI.from_geojson("berlin_boundary.geojson")  # file, JSON text or dict; features are merged
 request = dataclasses.replace(request, aoi=aoi)
@@ -113,6 +113,8 @@ Polygons crossing the antimeridian and polygons with more than
 `MAX_AOI_VERTICES` (10 000) vertices are rejected: simplify a detailed
 boundary first.
 
+![The 100 m map over its bounding box and clipped to the Berlin boundary](assets/figures/08_clip.png)
+
 Zonal statistics summarise a grid by districts or any other polygons:
 
 ```python
@@ -130,6 +132,8 @@ a misleading mean. One time step is read at a time, so a lazily opened
 Zarr store is never loaded whole. Available statistics:
 `ZONAL_STATISTICS` (`count`, `mean`, `std`, `min`, `max`, `median`, `p10`,
 `p90`).
+
+![District means relative to the city mean, from notebook 08](assets/figures/08_districts.png)
 
 ### Storage: AOI subsets instead of raw archives
 
@@ -172,7 +176,7 @@ fused thermal scene onto the predictor grid and returns it as
 ```python
 import dataclasses
 
-from sentinel_analysis import DownscaleSpec
+from citycube import DownscaleSpec
 
 request = AnalysisRequest.for_city(
     get_city("Berlin"), "2026-08-01", "2026-08-14",
@@ -204,7 +208,7 @@ directly.
 ## Execute
 
 ```python
-from sentinel_analysis import AnalysisWorkflow, ClientConfig
+from citycube import AnalysisWorkflow, ClientConfig
 
 result = AnalysisWorkflow(request).execute(
     "output/berlin",
@@ -227,7 +231,7 @@ variables per sensor) and raises `RequestTooLargeError` above
 processing is typically up to about twice the estimate. Pass your own
 `RequestLimits(max_aoi_km2=..., max_products_per_sensor=..., max_estimated_gb=...)`,
 or `limits=None` to disable the check; `estimate_request(request)` and
-`sentinel-analysis plan request.json` show the estimate without running
+`citycube plan request.json` show the estimate without running
 anything. The worker applies its own limits at submission (see
 `worker/.env.example`). The estimate does not cover external processors:
 a local SNAP run of one Sentinel-1 scene needs ~11 GB on its own.
@@ -242,10 +246,10 @@ providers register in `providers.AUXILIARY_PROVIDER_FACTORIES` the same way.
 ## CLI
 
 ```bash
-sentinel-analysis plan request.json
-sentinel-analysis discover request.json
-sentinel-analysis auxiliary request.json output/auxiliary
-sentinel-analysis run request.json output/run [--max-workers 1] [--gpt gpt]
+citycube plan request.json
+citycube discover request.json
+citycube auxiliary request.json output/auxiliary
+citycube run request.json output/run [--max-workers 1] [--gpt gpt]
 ```
 
 `plan` does not access the network and prints the size estimate. `discover` queries Sentinel catalogs.

@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-from sentinel_analysis import (  # noqa: E402
+from citycube import (  # noqa: E402
     AssetCache,
     CDSEDownloader,
     ClientConfig,

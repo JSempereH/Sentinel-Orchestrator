@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from sentinel_analysis import (
+from citycube import (
     AOI,
     AnalysisGrid,
     GridSpec,
@@ -82,12 +82,12 @@ from sentinel_analysis import (
     to_celsius,
     validate_cube,
 )
-from sentinel_analysis import CubeValidationError
-from sentinel_analysis.fusion import TemporalMatch
-from sentinel_analysis.sensors.ecostress import _FALLBACK_LST_OFFSET, _FALLBACK_LST_SCALE
-from sentinel_analysis.sensors.landsat import _stac_item_to_product_ref
-from sentinel_analysis.stac import STACItem
-from sentinel_analysis.workflow.runner import _combine_sentinel3, _mosaic_temporal_tiles
+from citycube import CubeValidationError
+from citycube.fusion import TemporalMatch
+from citycube.sensors.ecostress import _FALLBACK_LST_OFFSET, _FALLBACK_LST_SCALE
+from citycube.sensors.landsat import _stac_item_to_product_ref
+from citycube.stac import STACItem
+from citycube.workflow.runner import _combine_sentinel3, _mosaic_temporal_tiles
 
 
 def dataset() -> xr.Dataset:
@@ -178,7 +178,7 @@ def test_read_radiometric_offsets_resolves_band_id_and_defaults_empty(tmp_path: 
     # by QUANTIFICATION_VALUE - confirmed missing (and then fixed) against
     # a real downloaded L1C product in
     # scripts/validate_sentinel2_l1c_real_reference.py.
-    from sentinel_analysis.sensors.sentinel2 import _read_radiometric_offsets
+    from citycube.sensors.sentinel2 import _read_radiometric_offsets
 
     manifest = tmp_path / "MTD_MSIL1C.xml"
     manifest.write_text(
@@ -1326,7 +1326,7 @@ def test_atmospheric_column_conversion_is_explicitly_modelled():
 
 
 def test_fusion_quality_excludes_targets_and_diagnostics():
-    from sentinel_analysis import fusion_quality
+    from citycube import fusion_quality
 
     dataset = xr.Dataset(
         {

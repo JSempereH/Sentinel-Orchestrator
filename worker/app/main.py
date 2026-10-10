@@ -1,7 +1,7 @@
 """
-sentinel-worker API
+citycube-worker API
 
-Thin FastAPI wrapper around sentinel_analysis, deployable to any machine
+Thin FastAPI wrapper around citycube, deployable to any machine
 with the heavy geospatial dependencies installed (a beefier PC, a cloud VM,
 reachable over SSH tunnel/VPN/LAN). Exposes a simple submit/poll/download
 job shape: submit a job, poll its status, download the result once
@@ -35,9 +35,9 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from sentinel_analysis.credentials import ERROR, WARNING, check_credentials
-from sentinel_analysis.version import build_info
-from sentinel_analysis.workflow.limits import check_request
+from citycube.credentials import ERROR, WARNING, check_credentials
+from citycube.version import build_info
+from citycube.workflow.limits import check_request
 from starlette.background import BackgroundTask
 
 from . import jobs, usage
@@ -74,12 +74,12 @@ async def lifespan(_: FastAPI):
     jobs.prune_expired()
     stop = threading.Event()
     threading.Thread(target=_retention_loop, args=(stop,), name="retention", daemon=True).start()
-    logger.info("sentinel-worker %s (commit %s) started", BUILD["version"], BUILD["git_commit"])
+    logger.info("citycube-worker %s (commit %s) started", BUILD["version"], BUILD["git_commit"])
     yield
     stop.set()
 
 
-app = FastAPI(title="sentinel-worker API", version=str(BUILD["version"]), lifespan=lifespan)
+app = FastAPI(title="citycube-worker API", version=str(BUILD["version"]), lifespan=lifespan)
 
 
 @app.get("/health")
@@ -218,7 +218,7 @@ def download_result(job_id: str):
     # A fresh directory per request: with a fixed name per job, two concurrent
     # downloads of the same result overwrote one zip and the first to finish
     # deleted it under the other. Removed once the response has streamed.
-    scratch = Path(tempfile.mkdtemp(prefix="sentinel-worker-download-"))
+    scratch = Path(tempfile.mkdtemp(prefix="citycube-worker-download-"))
     archive_path = shutil.make_archive(str(scratch / job_id), "zip", root_dir=state.result_dir)
     cleanup = BackgroundTask(shutil.rmtree, scratch, ignore_errors=True)
     return FileResponse(archive_path, media_type="application/zip", filename=f"{job_id}.zip", background=cleanup)

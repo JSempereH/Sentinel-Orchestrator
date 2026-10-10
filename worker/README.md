@@ -1,6 +1,6 @@
-# sentinel-worker
+# citycube-worker
 
-A thin FastAPI wrapper around this repo's `sentinel_analysis` library,
+A thin FastAPI wrapper around this repo's `citycube` library,
 deployable to any machine with the geospatial dependencies installed (a
 beefier PC, a cloud VM, reachable over SSH tunnel/VPN/LAN). It turns a
 multisensor `AnalysisRequest` into a job: `POST /jobs` to submit, `GET
@@ -23,7 +23,7 @@ Python-binding gotcha; see the `gdal-dev` mailing list thread on
 `wrapper_GDALVectorTranslateDestName`). It fails with `TypeError: in method
 'wrapper_GDALVectorTranslateDestName', argument 2 of type
 'GDALDatasetShadow *'` before SNAP ever runs. This is a bug in `spatialist`,
-not in this worker or `sentinel_analysis` - `process_s1_ard`/
+not in this worker or `citycube` - `process_s1_ard`/
 `sentinel1_backend="s1ard"` now raises a `UserWarning` pointing here.
 
 `sentinel1_backend="snap"` (`process_s1_grd`) is the default and does not
@@ -87,7 +87,7 @@ do the same and check with
 
 ```bash
 make install-worker   # from the repo root: creates worker/.venv, installs deps
-                       # + sentinel_analysis[cdse,auxiliary,optical,sar,s1ard,cloud],
+                       # + citycube[cdse,auxiliary,optical,sar,s1ard,cloud],
                        # copies .env.example to .env
 ```
 
@@ -146,7 +146,7 @@ cd worker && .venv/bin/pytest
 ```
 
 Tests mock `app.jobs.execute_and_persist`, so they do not need
-`sentinel_analysis`'s heavy extras or real credentials installed.
+`citycube`'s heavy extras or real credentials installed.
 
 ## Notes
 

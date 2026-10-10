@@ -1,4 +1,4 @@
-# Runs the sentinel-worker in a container. An alternative to `make worker`
+# Runs the citycube-worker in a container. An alternative to `make worker`
 # (bare venv) for a more reproducible, restart-safe deployment.
 #
 # Usage:
@@ -18,7 +18,7 @@ services:
     env_file:
       - worker/.env
     volumes:
-      - sentinel-worker-data:/data
+      - citycube-worker-data:/data
     restart: unless-stopped
     # Reaps the job processes the worker spawns and forwards signals.
     init: true
@@ -30,4 +30,4 @@ services:
     stop_grace_period: 30s
 
 volumes:
-  sentinel-worker-data:
+  citycube-worker-data:

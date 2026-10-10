@@ -1,5 +1,5 @@
 <mxfile host="app.diagrams.net" modified="2026-08-26T00:00:00.000Z" version="24.7.17" type="device">
-  <diagram id="sentinel-analysis-architecture" name="Sentinel Analysis Architecture">
+  <diagram id="citycube-architecture" name="citycube architecture">
     <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
       <root>
         <mxCell id="0" />
@@ -85,7 +85,7 @@
         <mxCell id="thermal" value="&lt;b&gt;thermal_cube&lt;/b&gt;&lt;br&gt;Sentinel-3 thermal analysis grid" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F4F8;strokeColor=#00A6D6;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
           <mxGeometry x="1310" y="370" width="220" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="predictor" value="&lt;b&gt;predictor_cube&lt;/b&gt;&lt;br&gt;S1 / S2 / S5P + gridded auxiliary data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D7EEF5;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
+        <mxCell id="predictor" value="&lt;b&gt;predictors[sensor]&lt;/b&gt;&lt;br&gt;one fine cube per sensor (S1, S2, S5P, Landsat, ECOSTRESS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D7EEF5;strokeColor=#006B8F;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#003B5C;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">
           <mxGeometry x="1310" y="460" width="220" height="70" as="geometry" />
         </mxCell>
         <mxCell id="auxiliary" value="&lt;b&gt;auxiliary&lt;/b&gt;&lt;br&gt;ERA5 / CAMS grids + OpenAQ stations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8D9;strokeColor=#B38600;strokeWidth=2;fontFamily=Arial;fontSize=13;fontColor=#604C00;align=center;verticalAlign=middle;spacing=8;" vertex="1" parent="1">

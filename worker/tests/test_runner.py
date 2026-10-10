@@ -10,9 +10,9 @@ rather than mocked.
 import pytest
 
 from app.runner import build_request
-from sentinel_analysis.config import AOI
-from sentinel_analysis.cube import projected_bounds as _projected_bounds
-from sentinel_analysis.cube import utm_crs as _utm_epsg
+from citycube.config import AOI
+from citycube.cube import projected_bounds as _projected_bounds
+from citycube.cube import utm_crs as _utm_epsg
 
 
 def test_utm_epsg_northern_hemisphere_berlin():

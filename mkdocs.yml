@@ -1,11 +1,29 @@
-site_name: Sentinel Analysis
-site_description: Reproducible multisensor Sentinel analysis over areas of interest
-site_url: https://example.invalid/sentinel-analysis
-repo_name: sentinel-analysis
+site_name: citycube
+site_description: Multisensor Earth-observation cubes over a city or any polygon, with land-surface temperature downscaling
+site_url: https://jsempereh.github.io/citycube/
+repo_name: JSempereH/citycube
+repo_url: https://github.com/JSempereH/citycube
 
 theme:
   name: material
   language: en
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
   features:
     - navigation.sections
     - navigation.top
@@ -24,13 +42,13 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting started: getting-started.md
+  - Guides: guides.md
   - Setup and credentials: setup.md
   - E2E smoke test: e2e.md
   - Architecture: architecture.md
   - Platform: platform.md
   - Workflows: workflows.md
-  - Guides: guides.md
   - Validation: validation.md
-  - Downscaling and fusion: downscaling.md
-  - Roadmap and limitations: roadmap.md
-  - Change history: history.md
+  - Downscaling: downscaling.md
+  - Limitations: limitations.md

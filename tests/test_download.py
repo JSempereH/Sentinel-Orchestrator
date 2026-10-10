@@ -5,9 +5,9 @@ from typing import Any, cast
 
 import requests
 
-from sentinel_analysis.catalog import ProductRef
-from sentinel_analysis.config import ClientConfig
-from sentinel_analysis.download import CDSEDownloader
+from citycube.catalog import ProductRef
+from citycube.config import ClientConfig
+from citycube.download import CDSEDownloader
 
 
 class _Response:

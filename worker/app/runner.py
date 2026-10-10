@@ -1,4 +1,4 @@
-"""Wraps sentinel_analysis execution and persists the result to disk.
+"""Wraps citycube execution and persists the result to disk.
 
 AnalysisWorkflow.execute() returns an AnalysisResult holding only in-memory
 xarray Datasets - it never writes cubes to disk itself. This module is the
@@ -14,13 +14,13 @@ snaps a grid in the AOI's UTM zone.
 from pathlib import Path
 from typing import Callable
 
-from sentinel_analysis.config import AOI, ClientConfig
-from sentinel_analysis.cube import AnalysisGrid
-from sentinel_analysis.downscale import DownscaleSpec
-from sentinel_analysis.providers import AuxiliarySpec
-from sentinel_analysis.workflow.limits import RequestLimits
-from sentinel_analysis.workflow.request import AnalysisRequest
-from sentinel_analysis.workflow.runner import AnalysisWorkflow
+from citycube.config import AOI, ClientConfig
+from citycube.cube import AnalysisGrid
+from citycube.downscale import DownscaleSpec
+from citycube.providers import AuxiliarySpec
+from citycube.workflow.limits import RequestLimits
+from citycube.workflow.request import AnalysisRequest
+from citycube.workflow.runner import AnalysisWorkflow
 
 from .config import settings
 

@@ -120,7 +120,7 @@ def test_health_reports_the_running_build(client):
 
 
 def test_readiness_requires_auth_and_reports_503_when_a_check_fails(client, auth_headers, monkeypatch):
-    from sentinel_analysis.credentials import CredentialCheck
+    from citycube.credentials import CredentialCheck
 
     from app import main
 
@@ -201,7 +201,7 @@ def test_job_logs_never_contain_openeo_client_ids(tmp_path):
     log_file = tmp_path / "job.log"
     configure_job_logging("job-1234", log_file)
     logging.getLogger("openeo.rest.auth.oidc").info("token request with client_id 'SECRET-CLIENT-ID'")
-    logging.getLogger("sentinel_analysis.workflow.runner").info("sentinel3: acquiring 2 products")
+    logging.getLogger("citycube.workflow.runner").info("sentinel3: acquiring 2 products")
     for handler in logging.getLogger().handlers:
         handler.flush()
 

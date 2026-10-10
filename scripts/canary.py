@@ -25,7 +25,7 @@ to a temporary directory that is always removed.
 Example crontab entry (06:00 every day, mail on failure):
 
     MAILTO=you@example.org
-    0 6 * * * cd /path/to/Sentinel-Orchestrator && timeout 1800 uv run --extra cdse --extra optical --extra cloud python scripts/canary.py > /dev/null
+    0 6 * * * cd /path/to/citycube && timeout 1800 uv run --extra cdse --extra optical --extra cloud python scripts/canary.py > /dev/null
 
 The canary uses short network timeouts (2 minutes per read, 2 download
 attempts) so a stalled provider fails the check instead of hanging it;
@@ -52,7 +52,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _liveguard import acquire  # noqa: E402
-from sentinel_analysis import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, DownscaleSpec, build_info, check_credentials  # noqa: E402
+from citycube import AOI, AnalysisGrid, AnalysisRequest, AnalysisWorkflow, DownscaleSpec, build_info, check_credentials  # noqa: E402
 
 HISTORY = PROJECT_ROOT / "output" / "canary" / "history.jsonl"
 # Central Berlin: flat, frequently clear in summer, one Sentinel-3 tile.

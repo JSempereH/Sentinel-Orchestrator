@@ -1,5 +1,5 @@
 """Best-effort quota/credentials snapshot for the auxiliary providers this
-worker calls on behalf of sentinel_analysis.
+worker calls on behalf of citycube.
 
 Unlike ASF's HyP3 (a numeric processing-credit balance), CDSE, CDS/ADS and
 OpenAQ are not credit-balance systems:
@@ -27,7 +27,7 @@ _TIMEOUT_S = 8
 
 
 def _check_openaq() -> dict[str, Any]:
-    from sentinel_analysis.providers import OpenAQConfig
+    from citycube.providers import OpenAQConfig
 
     config = OpenAQConfig.from_env()
     if not config.api_key:
@@ -53,7 +53,7 @@ def _check_openaq() -> dict[str, Any]:
 
 
 def _check_cdse() -> dict[str, Any]:
-    from sentinel_analysis.config import ClientConfig
+    from citycube.config import ClientConfig
 
     try:
         ClientConfig.from_env()
@@ -67,7 +67,7 @@ def _check_cdse() -> dict[str, Any]:
 
 
 def _check_cds_ads() -> dict[str, Any]:
-    from sentinel_analysis.providers import CAMSConfig, ERA5Config
+    from citycube.providers import CAMSConfig, ERA5Config
 
     era5 = ERA5Config.from_env()
     cams = CAMSConfig.from_env()

@@ -1,6 +1,6 @@
 # Architecture
 
-![Sentinel Analysis architecture](assets/architecture.svg)
+![citycube architecture](assets/architecture.svg)
 
 The editable source is available as [`architecture.drawio`](assets/architecture.drawio).
 
@@ -18,9 +18,12 @@ WorkflowPlan -> discovery -> cache/download -> sensor readers
 
 ## Names
 
-`sentinel_analysis` is the current and only package name. The old names
-`sentinel3_lst` and `urban_heat` have no active source modules; they only
-remain in historical artifacts or ignored generated files.
+`citycube` is the current and only package name (import it as
+`import citycube as cc`; the command line is `citycube`). It was called
+`sentinel_analysis` until 2026-10-10, and `sentinel3_lst` and `urban_heat`
+before that; none of the old names has an active source module. The new
+name reflects what the package does: analysis-ready cubes over a city or
+any polygon, from Sentinel and non-Sentinel sources alike.
 
 `Sentinel3LST` is not an old project name. It is the local facade for
 Sentinel-3 LST products. `Sentinel3LSTClient` builds openEO graphs and remains

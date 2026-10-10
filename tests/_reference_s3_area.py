@@ -9,9 +9,9 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-from sentinel_analysis.cube import AnalysisGrid, CubeValidationError
-from sentinel_analysis.metadata import apply_variable_contract
-from sentinel_analysis.sensors.sentinel3.georeference import _corner_grid, _require_single_geolocation
+from citycube.cube import AnalysisGrid, CubeValidationError
+from citycube.metadata import apply_variable_contract
+from citycube.sensors.sentinel3.georeference import _corner_grid, _require_single_geolocation
 
 
 def reference_grid_area_l2_lst(dataset: xr.Dataset, grid: AnalysisGrid) -> xr.Dataset:
@@ -21,7 +21,7 @@ def reference_grid_area_l2_lst(dataset: xr.Dataset, grid: AnalysisGrid) -> xr.Da
         from shapely.geometry import Polygon, box
         from shapely.strtree import STRtree
     except ImportError as exc:
-        raise RuntimeError("Install sentinel-analysis[geo] for Sentinel-3 footprint aggregation") from exc
+        raise RuntimeError("Install citycube[geo] for Sentinel-3 footprint aggregation") from exc
     required = {"lst", "latitude", "longitude"}
     missing = sorted(required.difference(dataset.data_vars))
     if missing:
